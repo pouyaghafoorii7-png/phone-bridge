@@ -121,6 +121,9 @@ object CallTap {
     /** One line about the phone (maker, Android, chip, what the call line offers). */
     fun info(): String = try { svc()?.info() ?: "" } catch (_: Exception) { "" }
 
+    /** The service's own recent log lines, for bug reports. */
+    fun log(): String = try { svc()?.log() ?: "" } catch (_: Exception) { "" }
+
     /**
      * Opens the call line with one method: the caller's voice comes out of [CallLine.read], the
      * iPhone voice goes in with [CallLine.send]. Returns null and the reason when the phone refuses.
@@ -128,38 +131,39 @@ object CallTap {
     fun openLine(method: String): Pair<CallLine?, String> {
         val s = svc() ?: return null to state()
         val down = ParcelFileDescriptor.createPipe()
-        val up = if (CallTapService.carriesUplink(method)) ParcelFileDescriptor.createPipe() else null
+        val up = ParcelFileDescriptor.createPipe()
         val why = try {
-            s.open(method, AudioBridge.RATE, down[1], up?.get(0))
+            s.open(method, AudioBridge.RATE, down[1], up[0])
         } catch (e: Exception) { e.message ?: "binder" }
         down[1].close() // the shell process has its own copies now
-        up?.get(0)?.close()
+        up[0].close()
         if (why.isNotEmpty()) {
             down[0].close()
-            up?.get(1)?.close()
+            up[1].close()
             Log.w(TAG, "open $method: $why")
             return null to why
         }
-        return CallLine(s, method, down[0], up?.get(1)) to ""
+        val route = try { s.route() } catch (_: Exception) { "direct" }
+        return CallLine(s, method, route, down[0], up[1]) to ""
     }
 
     /** Both directions of the call through the shell service. */
     class CallLine(
         private val s: ICallTap,
         val method: String,
+        /** "direct": the iPhone voice goes into the call. "speaker": the service plays it on the speaker. */
+        val route: String,
         downFd: ParcelFileDescriptor,
-        upFd: ParcelFileDescriptor?,
+        upFd: ParcelFileDescriptor,
     ) : PcmSource {
         private val input = DataInputStream(ParcelFileDescriptor.AutoCloseInputStream(downFd))
-        private val output = upFd?.let { ParcelFileDescriptor.AutoCloseOutputStream(it) }
+        private val output = ParcelFileDescriptor.AutoCloseOutputStream(upFd)
         private val inBytes = ByteArray(AudioBridge.FRAME * 2)
         private val outBytes = ByteArray(AudioBridge.FRAME * 2)
         @Volatile private var upBroken = false
 
-        override val name = "call line ($method)"
-        override val direct = true
-        /** True when the iPhone voice goes straight into the call (no speaker needed). */
-        val carriesUplink get() = output != null && !upBroken
+        override val name = (if (route == "direct") "call line (" else "speaker bridge (") + LineMethods.label(method) + ")"
+        override val direct = route == "direct"
 
         override fun read(buf: ShortArray): Boolean = try {
             input.readFully(inBytes)
@@ -169,16 +173,15 @@ object CallTap {
 
         /** One 40 ms frame of the iPhone user's voice into the call. */
         fun send(frame: ShortArray) {
-            val out = output ?: return
             if (upBroken) return
             ByteBuffer.wrap(outBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(frame, 0, AudioBridge.FRAME)
-            try { out.write(outBytes) } catch (_: IOException) { upBroken = true }
+            try { output.write(outBytes) } catch (_: IOException) { upBroken = true }
         }
 
         override fun close() {
             try { s.close() } catch (_: Exception) {}
             try { input.close() } catch (_: Exception) {}
-            try { output?.close() } catch (_: Exception) {}
+            try { output.close() } catch (_: Exception) {}
         }
     }
 }

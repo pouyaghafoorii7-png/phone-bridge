@@ -1,18 +1,18 @@
 package com.phonebridge.android;
 
-// Runs inside the Shizuku user service with the shell identity (uid 2000). See CallTapService.kt.
-// Both directions of the phone call, the iTell way: the caller's voice comes out of the call line,
-// the iPhone user's voice goes into the call line. No speaker, no microphone.
+// Runs inside the shell process (uid 2000), started by built-in ADB or by Shizuku. See CallTapService.kt.
+// Both directions of the phone call, the iTell way: the caller's voice comes out of the call,
+// the iPhone user's voice goes into it. Which way depends on the phone; see LineMethods.kt.
 interface ICallTap {
     // Called by Shizuku when the service must stop. The code is fixed by Shizuku.
     void destroy() = 16777114;
 
-    // The ways this phone may do it, best first, comma separated (see CallTapService.order()).
+    // The methods that can work on this phone, best first, comma separated (iTell's letter codes).
     String methods() = 1;
 
     // Opens the call line with one method. 16-bit mono PCM little-endian at `rate` Hz.
     // `down`: the service writes the caller's voice here. `up`: the service reads the iPhone
-    // user's voice from here and puts it into the call (null = capture only).
+    // user's voice from here and puts it into the call (or plays it, for the speaker methods).
     // Returns "" when it works, otherwise a short reason.
     String open(String method, int rate, in ParcelFileDescriptor down, in ParcelFileDescriptor up) = 2;
 
@@ -24,4 +24,10 @@ interface ICallTap {
 
     // One line about this phone, for the status screen and bug reports.
     String info() = 5;
+
+    // Where the iPhone voice goes for the open method: "direct" (into the call) or "speaker".
+    String route() = 6;
+
+    // The service's own recent log lines, for bug reports.
+    String log() = 7;
 }

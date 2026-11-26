@@ -31,6 +31,8 @@ class AudioBridge(
     private val ctx: Context,
     private val sendFrame: (ByteArray) -> Unit,
     private val onInfo: (String, String) -> Unit = { _, _ -> }, // (kind, detail) for the iPhone
+    /** True once the call is answered. A line is not judged silent before that (it rings first). */
+    private val isActive: () -> Boolean = { true },
 ) {
     companion object {
         const val RATE = 16000
@@ -49,9 +51,34 @@ class AudioBridge(
 
         fun workedMethod(ctx: Context): String =
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_WORKED, "") ?: ""
+
+        private const val KEY_FAILS = "line_fails"
+
+        /** How many calls each method failed on (silent line or refused), as "k7:2,d4:1". */
+        fun failures(ctx: Context): Map<String, Int> =
+            (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_FAILS, "") ?: "")
+                .split(',').mapNotNull { e -> e.split(':').takeIf { it.size == 2 }?.let { it[0] to (it[1].toIntOrNull() ?: 0) } }.toMap()
+
+        private fun saveFailures(ctx: Context, m: Map<String, Int>) =
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_FAILS, m.filterValues { it > 0 }.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
+
+        /** Forget what failed, so automatic mode tries every method again. */
+        fun resetResults(ctx: Context) {
+            saveFailures(ctx, emptyMap())
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_WORKED).apply()
+        }
+
+        /** A method skipped by automatic mode after it failed on this many calls. */
+        const val SKIP_AFTER = 2
+
+        /** At most this many methods are tried during one call; the rest wait for a later call or a pick. */
+        const val AUTO_TRIES = 4
     }
 
     @Volatile private var running = false
+    /** Set by [pump] once the source gave real sound while the call was answered. */
+    @Volatile private var verified = false
     @Volatile private var loudUntil = 0L
     private val queue = LinkedBlockingQueue<ShortArray>(64)
     @Volatile private var current: PcmSource? = null
@@ -77,26 +104,23 @@ class AudioBridge(
             for (method in lineOrder()) {
                 if (!running) return
                 val (line, err) = CallTap.openLine(method)
-                if (line == null) { why = "$method: $err"; continue }
+                if (line == null) { why = "$method: $err"; noteResult(method, ok = false); continue }
                 current = line
-                if (line.carriesUplink) {
-                    sink = { line.send(it) }
-                    onInfo("route", "direct")
-                } else {
-                    speakerSink() // only the caller comes from the line; our voice by speaker or cable
-                }
-                // The call line gives exact zeros when the phone blocks it: allow 6 s for real sound.
-                if (pump(line, window = 150, floor = 1.0)) {
-                    prefs.edit().putString(KEY_WORKED, method).apply()
+                // The service puts the iPhone voice into the call (or plays it on the speaker for the
+                // speaker methods); we only hand it the frames.
+                sink = { line.send(it) }
+                onInfo("route", line.route)
+                // The call line gives exact zeros when the phone blocks it: allow 4 s of an answered call.
+                if (pump(line, window = 100, floor = 1.0)) {
+                    if (verified) noteResult(method, ok = true) // real sound came through before the call ended
                     return // the call ended while the line worked
                 }
                 line.close()
                 current = null
                 sink = null
-                track?.let { try { it.stop() } catch (_: Exception) {}; it.release() }
-                track = null
-                why = "$method: silent"
                 if (!running) return
+                noteResult(method, ok = false)
+                why = "$method: silent"
             }
         }
 
@@ -131,12 +155,14 @@ class AudioBridge(
         val buf = ShortArray(FRAME)
         var frames = 0
         var heard = 0.0
+        verified = false
         while (running) {
             if (!src.read(buf)) return !running
-            if (frames < window) {
+            if (frames < window && isActive()) {
                 heard = maxOf(heard, rms(buf))
                 if (++frames == window) {
                     if (heard < floor) return false
+                    verified = true
                     onInfo("source", src.name)
                 }
             }
@@ -155,7 +181,22 @@ class AudioBridge(
         val forced = forcedMethod(ctx)
         if (forced.isNotEmpty() && forced in all) return listOf(forced)
         val worked = prefs.getString(KEY_WORKED, "") ?: ""
-        return if (worked in all) listOf(worked) + (all - worked) else all
+        val fails = failures(ctx)
+        val rest = all.filter { it != worked && (fails[it] ?: 0) < SKIP_AFTER }
+        return ((if (worked in all) listOf(worked) else emptyList()) + rest).take(AUTO_TRIES)
+    }
+
+    /** Remember what happened, so the next call starts with the method that works and skips the dead ones. */
+    private fun noteResult(method: String, ok: Boolean) {
+        val m = failures(ctx).toMutableMap()
+        if (ok) {
+            m.remove(method)
+            prefs.edit().putString(KEY_WORKED, method).apply()
+        } else {
+            m[method] = (m[method] ?: 0) + 1
+            if (prefs.getString(KEY_WORKED, "") == method) prefs.edit().remove(KEY_WORKED).apply()
+        }
+        saveFailures(ctx, m)
     }
 
     private class MicSource(private val r: AudioRecord, override val name: String, val echo: Boolean) : PcmSource {

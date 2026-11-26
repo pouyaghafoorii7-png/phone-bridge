@@ -282,7 +282,11 @@ class BridgeService : Service() {
         ws?.send(c.seal(event))
     }
 
+    /** True from the moment the call is answered until it ends (while dialing it only rings). */
+    @Volatile private var callActive = false
+
     private fun onCallState(state: String) {
+        callActive = state == "active"
         when (state) {
             "active", "dialing" -> if (audioWanted && audio == null) startAudio()
             "ended" -> stopAudio()
@@ -295,9 +299,9 @@ class BridgeService : Service() {
             send(JSONObject().put("t", "audio_error").put("why", "accessibility"))
         }
         goForeground(withMic = true)
-        audio = AudioBridge(this, { sendAudio(it) }) { kind, detail ->
+        audio = AudioBridge(this, { sendAudio(it) }, { kind, detail ->
             main.post { send(JSONObject().put("t", "audio_info").put("kind", kind).put("detail", detail)) }
-        }.also { it.start() }
+        }, { callActive }).also { it.start() }
         send(JSONObject().put("t", "audio_start"))
     }
 

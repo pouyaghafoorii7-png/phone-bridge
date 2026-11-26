@@ -74,17 +74,19 @@ class CallTapTest {
     @Test
     fun callLineRecords() {
         log("phone: ${CallTap.info()}")
+        val offered = CallTap.methods()
+        log("methods offered here (${offered.size}): " + offered.joinToString(" ") { "$it=${LineMethods.label(it)}" })
         val results = mutableListOf<String>()
         var opened = 0
-        for (method in CallTap.methods()) {
+        for (method in offered) {
             val (line, why) = CallTap.openLine(method)
-            if (line == null) { results += "$method: FAILED ($why)"; continue }
+            if (line == null) { results += "METHOD $method ${LineMethods.label(method)}: REFUSED ($why)"; continue }
             opened++
             val buf = ShortArray(AudioBridge.FRAME)
             var frames = 0
             var peak = 0.0
             val t0 = System.currentTimeMillis()
-            while (frames < 50 && line.read(buf)) {
+            while (frames < 25 && line.read(buf)) {
                 frames++
                 line.send(buf) // also push frames the other way
                 var sum = 0.0; for (x in buf) sum += x.toDouble() * x
@@ -92,9 +94,12 @@ class CallTapTest {
             }
             val ms = System.currentTimeMillis() - t0
             line.close()
-            results += "$method: OPEN (uplink ${line.carriesUplink}), $frames frames in $ms ms, peak rms ${"%.1f".format(peak)}"
+            results += "METHOD $method ${LineMethods.label(method)}: OPEN (${line.route}), $frames frames in $ms ms, peak rms ${"%.1f".format(peak)}"
         }
         results.forEach { log(it) }
+        // What the service itself said, so a refusal can be understood from this log.
+        CallTap.log().lines().takeLast(60).forEach { log("service: $it") }
+        log("SUMMARY: ${offered.size} methods offered, $opened opened")
         assertTrue("no call line method could be opened: $results", opened > 0)
     }
 
@@ -102,12 +107,12 @@ class CallTapTest {
     fun audioBridgeSendsCallerSound() {
         val frames = AtomicInteger()
         val info = mutableListOf<String>()
-        val bridge = AudioBridge(ctx, { frames.incrementAndGet() }) { k, d -> synchronized(info) { info += "$k=$d" } }
+        val bridge = AudioBridge(ctx, { frames.incrementAndGet() }, { k, d -> synchronized(info) { info += "$k=$d" } }, { true })
         onMain { bridge.start() }
         // Play a 1 s tone as "the iPhone user", like frames from the iPhone.
         val tone = ShortArray(AudioBridge.FRAME) { (8000 * kotlin.math.sin(2 * Math.PI * 440 * it / AudioBridge.RATE)).toInt().toShort() }
         repeat(25) { bridge.play(MuLaw.encode(tone)); Thread.sleep(40) }
-        Thread.sleep(9_000) // longer than the 6 s silence check of the call line
+        Thread.sleep(9_000) // longer than the 4 s silence check of the call line
         bridge.stop()
         log("AudioBridge: ${frames.get()} frames sent, info: $info")
         assertTrue("too few frames: ${frames.get()}", frames.get() > 150)

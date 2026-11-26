@@ -72,13 +72,8 @@ class MainActivity : Activity() {
         button("4b. Clean call sound: direct call line (no extra app)") { openCleanLine() }
         button("4c. Clean call sound with Shizuku (other way)") { openShizuku() }
         lateinit var methodButton: Button
-        methodButton = button(methodLabel()) {
-            // Like iTell's method list: automatic, or one method by hand when automatic picks badly.
-            val all = listOf("") + CallTap.methods()
-            val now = AudioBridge.forcedMethod(this)
-            AudioBridge.setForcedMethod(this, all[(all.indexOf(now) + 1) % all.size])
-            methodButton.text = methodLabel()
-        }
+        methodButton = button(methodLabel()) { pickMethod { methodButton.text = methodLabel() } }
+        button("Call line log (for a bug report)") { showLineLog() }
         button("5. Create new pairing (QR)") {
             val address = url.text.toString().trim()
             status.text = "Checking the server…"
@@ -154,8 +149,52 @@ class MainActivity : Activity() {
     private fun methodLabel(): String {
         val forced = AudioBridge.forcedMethod(this)
         val last = AudioBridge.workedMethod(this)
-        return "Call line method: " + if (forced.isNotEmpty()) forced else
-            "automatic" + (if (last.isNotEmpty()) " (works: $last)" else "")
+        return "Call line method: " + if (forced.isNotEmpty()) LineMethods.label(forced) else
+            "automatic" + (if (last.isNotEmpty()) " (works: ${LineMethods.label(last)})" else "")
+    }
+
+    /**
+     * iTell's method list: Automatic, or one method by hand (named like iTell's picker, so you can
+     * choose the animal that works for you in iTell). Methods that failed show how many calls.
+     */
+    private fun pickMethod(done: () -> Unit) {
+        val all = CallTap.methods()
+        if (all.isEmpty()) { status.text = "Connect the call line first (4b or 4c), then pick a method."; return }
+        val worked = AudioBridge.workedMethod(this)
+        val fails = AudioBridge.failures(this)
+        val codes = listOf("") + all
+        val labels = codes.map { c ->
+            if (c.isEmpty()) "Automatic (recommended)" + (if (worked in all) " — works: ${LineMethods.label(worked)}" else "")
+            else LineMethods.pickerLabel(c) + when {
+                c == worked -> "   ✓ works"
+                (fails[c] ?: 0) > 0 -> "   ✗ failed ${fails[c]}×"
+                else -> ""
+            }
+        }
+        val checked = codes.indexOf(AudioBridge.forcedMethod(this)).coerceAtLeast(0)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Call line method (${all.size} on this phone)")
+            .setSingleChoiceItems(labels.toTypedArray(), checked) { d, i ->
+                AudioBridge.setForcedMethod(this, codes[i])
+                done()
+                d.dismiss()
+            }
+            .setNeutralButton("Forget results") { _, _ -> AudioBridge.resetResults(this); done() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    /** The call-line service's own log: copy it into a bug report when a method does not work. */
+    private fun showLineLog() {
+        val text = CallTap.log().ifEmpty { "No call line log yet. Connect (4b or 4c) and make a call." }
+        val tv = TextView(this).apply {
+            this.text = CallTap.info() + "\n\n" + text
+            setTextIsSelectable(true)
+            setPadding(32, 24, 32, 24)
+            textSize = 12f
+        }
+        android.app.AlertDialog.Builder(this).setTitle("Call line log").setView(ScrollView(this).apply { addView(tv) })
+            .setPositiveButton("Close", null).show()
     }
 
     /**
