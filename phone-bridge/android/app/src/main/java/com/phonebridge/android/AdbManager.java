@@ -16,24 +16,16 @@ import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Date;
-import java.util.Random;
 
 import io.github.muntashirakon.adb.AbsAdbConnectionManager;
-import sun.security.x509.AlgorithmId;
-import sun.security.x509.CertificateAlgorithmId;
-import sun.security.x509.CertificateExtensions;
-import sun.security.x509.CertificateIssuerName;
-import sun.security.x509.CertificateSerialNumber;
-import sun.security.x509.CertificateSubjectName;
-import sun.security.x509.CertificateValidity;
-import sun.security.x509.CertificateVersion;
-import sun.security.x509.CertificateX509Key;
-import sun.security.x509.KeyIdentifier;
-import sun.security.x509.PrivateKeyUsageExtension;
-import sun.security.x509.SubjectKeyIdentifierExtension;
-import sun.security.x509.X500Name;
-import sun.security.x509.X509CertImpl;
-import sun.security.x509.X509CertInfo;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.asn1.x500.X500Name;
+
+import java.math.BigInteger;
 
 /**
  * Holds the RSA key and certificate the built-in ADB client authenticates with (the iTell way).
@@ -86,33 +78,15 @@ public class AdbManager extends AbsAdbConnectionManager {
     }
 
     private static Certificate makeCertificate(PublicKey publicKey, PrivateKey privateKey) throws Exception {
-        String subject = "CN=Ghafoorii";
-        String algorithmName = "SHA512withRSA";
-        long expiry = System.currentTimeMillis() + 10L * 365 * 24 * 60 * 60 * 1000; // 10 years
-
-        CertificateExtensions extensions = new CertificateExtensions();
-        extensions.set("SubjectKeyIdentifier",
-                new SubjectKeyIdentifierExtension(new KeyIdentifier(publicKey).getIdentifier()));
-        X500Name x500Name = new X500Name(subject);
+        X500Name subject = new X500Name("CN=Ghafoorii");
         Date notBefore = new Date();
-        Date notAfter = new Date(expiry);
-        extensions.set("PrivateKeyUsage", new PrivateKeyUsageExtension(notBefore, notAfter));
-        CertificateValidity validity = new CertificateValidity(notBefore, notAfter);
-
-        X509CertInfo info = new X509CertInfo();
-        info.set("version", new CertificateVersion(2));
-        info.set("serialNumber", new CertificateSerialNumber(new Random().nextInt() & Integer.MAX_VALUE));
-        AlgorithmId algorithmId = AlgorithmId.get("SHA512WithRSA");
-        info.set("algorithmID", new CertificateAlgorithmId(algorithmId));
-        info.set("subject", new CertificateSubjectName(x500Name));
-        info.set("key", new CertificateX509Key(publicKey));
-        info.set("validity", validity);
-        info.set("issuer", new CertificateIssuerName(x500Name));
-        info.set("extensions", extensions);
-
-        X509CertImpl cert = new X509CertImpl(info);
-        cert.sign(privateKey, algorithmName);
-        return cert;
+        Date notAfter = new Date(System.currentTimeMillis() + 10L * 365 * 24 * 60 * 60 * 1000); // 10 years
+        BigInteger serial = BigInteger.valueOf(System.currentTimeMillis());
+        JcaX509v3CertificateBuilder builder =
+                new JcaX509v3CertificateBuilder(subject, serial, notBefore, notAfter, subject, publicKey);
+        ContentSigner signer = new JcaContentSignerBuilder("SHA512withRSA").build(privateKey);
+        X509CertificateHolder holder = builder.build(signer);
+        return new JcaX509CertificateConverter().getCertificate(holder);
     }
 
     private static void writeKey(File f, PrivateKey key) throws Exception {
