@@ -240,6 +240,33 @@ struct ChatView: View {
     let peer: String
     @State private var draft = ""
     @FocusState private var focused: Bool
+    /// A line picked by hand for this chat.
+    @State private var lineChoice: Int?
+
+    /// With two SIMs: the line you picked, else the one this chat already uses.
+    private var line: Int? { store.hasLines ? (lineChoice ?? store.lineForSMS(to: number)) : nil }
+
+    private var placeholder: String {
+        guard let name = store.lineName(line) else { return "Text Message · SMS" }
+        return "Text Message · " + name
+    }
+
+    /// Choose which SIM sends: the little SIM button left of the message field.
+    private var lineMenu: some View {
+        Menu {
+            ForEach(store.lines) { l in
+                Button { lineChoice = l.id } label: {
+                    Label(store.lineName(l.id) ?? l.name, systemImage: l.id == line ? "checkmark" : "simcard")
+                }
+            }
+        } label: {
+            Image(systemName: "simcard")
+                .font(.system(size: 19))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 38)
+        }
+        .accessibilityLabel("Send from")
+    }
 
     private var number: String {
         if let p = pendingPeer, phoneKey(p) == threadKey, store.thread(threadKey).isEmpty { return p }
@@ -302,15 +329,16 @@ struct ChatView: View {
     private var inputBar: some View {
         let canSend = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.linkUp
         return HStack(alignment: .bottom, spacing: 8) {
+            if store.hasLines { lineMenu }
             HStack(alignment: .bottom) {
-                TextField("Text Message · SMS", text: $draft, axis: .vertical)
+                TextField(placeholder, text: $draft, axis: .vertical)
                     .lineLimit(1...6)
                     .focused($focused)
                     .padding(.vertical, 8)
                     .padding(.leading, 14)
                 if canSend {
                     Button {
-                        store.sendSMS(to: number, body: draft)
+                        store.sendSMS(to: number, body: draft, line: line)
                         draft = ""
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")

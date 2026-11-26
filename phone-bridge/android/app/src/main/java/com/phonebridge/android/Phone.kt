@@ -31,11 +31,22 @@ object Phone {
         }
     }
 
-    fun sendSms(ctx: Context, to: String, body: String): Boolean {
+    /** The SMS manager of one SIM (a subscription id), or the phone's default one. */
+    private fun smsManager(ctx: Context, sim: Int?): SmsManager {
+        if (sim != null) {
+            try {
+                return if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java).createForSubscriptionId(sim)
+                else @Suppress("DEPRECATION") SmsManager.getSmsManagerForSubscriptionId(sim)
+            } catch (_: Throwable) { /* unknown SIM: use the default */ }
+        }
+        return if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java)
+        else @Suppress("DEPRECATION") SmsManager.getDefault()
+    }
+
+    fun sendSms(ctx: Context, to: String, body: String, sim: Int? = null): Boolean {
         if (!has(ctx, android.Manifest.permission.SEND_SMS)) return false
         return try {
-            val sm = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java)
-            else @Suppress("DEPRECATION") SmsManager.getDefault()
+            val sm = smsManager(ctx, sim)
             sm.sendMultipartTextMessage(to, null, sm.divideMessage(body), null, null)
             true
         } catch (e: Exception) {
@@ -48,8 +59,15 @@ object Phone {
         val out = JSONArray()
         if (!has(ctx, android.Manifest.permission.READ_SMS)) return out
         val names = HashMap<String, String?>()
-        val cols = arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE)
-        ctx.contentResolver.query(Telephony.Sms.CONTENT_URI, cols, null, null, "${Telephony.Sms.DATE} DESC")?.use { c ->
+        val accounts = Sims.AccountMap(ctx)
+        val base = arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE)
+        val cols = base + Telephony.Sms.SUBSCRIPTION_ID // column 5: which SIM
+        val cursor = try {
+            ctx.contentResolver.query(Telephony.Sms.CONTENT_URI, cols, null, null, "${Telephony.Sms.DATE} DESC")
+        } catch (e: Exception) { null }
+            ?: ctx.contentResolver.query(Telephony.Sms.CONTENT_URI, base, null, null, "${Telephony.Sms.DATE} DESC")
+        cursor?.use { c ->
+            val hasSim = c.columnCount > 5
             while (c.moveToNext() && out.length() < limit) {
                 val addr = c.getString(1) ?: continue
                 val type = c.getInt(4)
@@ -61,7 +79,8 @@ object Phone {
                     .put("name", name ?: JSONObject.NULL)
                     .put("body", c.getString(2) ?: "")
                     .put("ts", c.getLong(3) / 1000.0)
-                    .put("out", type == Telephony.Sms.MESSAGE_TYPE_SENT))
+                    .put("out", type == Telephony.Sms.MESSAGE_TYPE_SENT)
+                    .apply { if (hasSim) accounts.known(c.getInt(5))?.let { put("sim", it) } })
             }
         }
         return out
@@ -71,8 +90,10 @@ object Phone {
     fun recentCalls(ctx: Context, limit: Int = 200): JSONArray {
         val out = JSONArray()
         if (!has(ctx, android.Manifest.permission.READ_CALL_LOG)) return out
+        val accounts = Sims.AccountMap(ctx)
         val cols = arrayOf(CallLog.Calls._ID, CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME,
-            CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION)
+            CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION,
+            CallLog.Calls.PHONE_ACCOUNT_COMPONENT_NAME, CallLog.Calls.PHONE_ACCOUNT_ID)
         try {
             ctx.contentResolver.query(CallLog.Calls.CONTENT_URI, cols, null, null, "${CallLog.Calls.DATE} DESC")?.use { c ->
                 while (c.moveToNext() && out.length() < limit) {
@@ -89,7 +110,8 @@ object Phone {
                         .put("name", c.getString(2) ?: JSONObject.NULL)
                         .put("type", type)
                         .put("ts", c.getLong(4) / 1000.0)
-                        .put("dur", c.getLong(5)))
+                        .put("dur", c.getLong(5))
+                        .apply { accounts.sub(c.getString(6), c.getString(7))?.let { put("sim", it) } })
                 }
             }
         } catch (e: Exception) { }
@@ -125,7 +147,7 @@ object Phone {
      * Carrier call forwarding (GSM MMI codes). The carrier sends calls for this SIM to [number],
      * so the iPhone rings natively with full-quality audio.
      */
-    fun forward(ctx: Context, mode: String, number: String): Boolean {
+    fun forward(ctx: Context, mode: String, number: String, sim: Int? = null): Boolean {
         val n = number.filter { it.isDigit() || it == '+' }
         val code = when (mode) {
             "all" -> "**21*$n#"
@@ -137,7 +159,7 @@ object Phone {
             else -> return false
         }
         if (mode != "off" && n.length < 5) return false
-        return dial(ctx, code)
+        return dial(ctx, code, sim)
     }
 
     private fun telecom(ctx: Context) = ctx.getSystemService(TelecomManager::class.java)
@@ -156,9 +178,12 @@ object Phone {
     }
 
     @SuppressLint("MissingPermission")
-    fun dial(ctx: Context, number: String): Boolean {
+    fun dial(ctx: Context, number: String, sim: Int? = null): Boolean {
         if (!has(ctx, android.Manifest.permission.CALL_PHONE)) return false
-        telecom(ctx).placeCall(Uri.fromParts("tel", number, null), Bundle())
+        val extras = Bundle()
+        // A chosen SIM goes in as the Telecom account; without it Android uses (or asks for) its default.
+        sim?.let { s -> Sims.phoneAccount(ctx, s)?.let { extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) } }
+        telecom(ctx).placeCall(Uri.fromParts("tel", number, null), extras)
         return true
     }
 }

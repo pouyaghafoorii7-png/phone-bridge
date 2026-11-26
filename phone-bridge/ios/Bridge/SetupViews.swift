@@ -145,6 +145,34 @@ struct SettingsView: View {
                     }
                 }
 
+                if store.hasLines {
+                    Section {
+                        ForEach(store.lines) { l in
+                            HStack(spacing: 10) {
+                                Image(systemName: "simcard.fill").foregroundStyle(.secondary)
+                                TextField(l.name, text: Binding(
+                                    get: { store.lineNames[l.id] ?? "" },
+                                    set: { store.lineNames[l.id] = $0 }))
+                                if !l.number.isEmpty {
+                                    Text(formatNumber(l.number)).font(.footnote).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Picker("Default Voice Line", selection: $store.voiceLineChoice) {
+                            Text("Same as Android").tag(Int?.none)
+                            ForEach(store.lines) { l in Text(store.lineName(l.id) ?? l.name).tag(Int?.some(l.id)) }
+                        }
+                        Picker("Default Message Line", selection: $store.smsLineChoice) {
+                            Text("Same as Android").tag(Int?.none)
+                            ForEach(store.lines) { l in Text(store.lineName(l.id) ?? l.name).tag(Int?.some(l.id)) }
+                        }
+                    } header: {
+                        Text("Lines")
+                    } footer: {
+                        Text("Name each SIM to tell them apart. A call goes out on the line you used last with that contact; a reply uses the line the chat already uses. Touch and hold Call on a contact to choose a line.")
+                    }
+                }
+
                 Section {
                     Toggle("Call Sound over the Internet", isOn: $store.internetAudio)
                     Toggle("Stay Connected in Background", isOn: $store.stayConnected)

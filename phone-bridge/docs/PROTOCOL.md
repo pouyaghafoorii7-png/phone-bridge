@@ -44,3 +44,17 @@ Android to iPhone, about the call sound (no reply needed):
   - `direct`: why the call line is not used: `missing` (Shizuku not running), `denied`, `starting`,
     `silent` (the phone gives zeros), or the error from the shell service.
   - `problem`: `mic` (nothing could open) or `silent` (all sources gave silence).
+
+## Dual SIM (lines)
+The Android phone tells the iPhone about its SIM cards; every call and message then names its SIM.
+All fields are optional: a missing `sim` means "unknown or single SIM", so old and new versions work together.
+
+Android to iPhone:
+- `{"t":"sims","items":[{"id":3,"slot":0,"name":"Irancell","carrier":"Irancell","number":"+98912..."}],"call":3,"sms":4}`
+  The active SIMs in slot order. `id` is Android's subscription id. `call` and `sms` are the phone's
+  default voice and SMS SIM (`null` = it asks every time). Sent on `sync`, on `sims_sync`, and when a SIM changes.
+- `sim` (subscription id) is added to `sms`, `call`, and the items of `sms_batch` and `calls_batch`.
+
+iPhone to Android:
+- `{"t":"sims_sync"}`: send the SIM list again.
+- `dial`, `send_sms` and `forward` accept `"sim": <id>`. Without it the phone's default SIM is used.

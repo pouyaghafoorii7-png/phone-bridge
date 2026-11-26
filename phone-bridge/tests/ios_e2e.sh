@@ -96,4 +96,19 @@ xcrun simctl io "$UDID" screenshot "$SHOTS/10-wrong-pin-refused.png" >/dev/null
 if grep -q "room=$BADROOM" /tmp/relay.log; then echo "FAIL: app connected despite a wrong certificate pin"; exit 1; fi
 echo "wrong pin refused: OK"
 grep -q '"t": "sync"' /tmp/fa/commands.log || { echo "FAIL: no sync"; exit 1; }
+echo "== dual SIM: a message and a call pick the right line"
+xcrun simctl terminate "$UDID" com.phonebridge.ios 2>/dev/null || true
+xcrun simctl launch "$UDID" com.phonebridge.ios -pairHex "$PAIR" -tab keypad -simTest YES >/dev/null
+sleep 9
+python3 - <<'PY' || { echo "FAIL: dual SIM line choice"; exit 1; }
+import json
+cmds = [json.loads(l) for l in open("/tmp/fa/commands.log")]
+sms = [c for c in cmds if c.get("t") == "send_sms" and c.get("body") == "simtest"]
+dial = [c for c in cmds if c.get("t") == "dial" and c.get("number") == "+989121110001"]
+assert sms, "no message sent"
+assert sms[-1].get("sim") == 2, f"a new message must use the default message line (2): {sms[-1]}"
+assert dial, "no call placed"
+assert dial[-1].get("sim") == 2, f"a call must use the line of the last call with that number (2), not the default (1): {dial[-1]}"
+print("dual SIM OK: message on line", sms[-1]["sim"], ", call on line", dial[-1]["sim"])
+PY
 echo "E2E OK: iPhone app paired, synced and sent an encrypted command through the relay"

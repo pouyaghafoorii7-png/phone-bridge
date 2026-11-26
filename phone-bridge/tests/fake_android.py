@@ -48,14 +48,26 @@ CALLS = [  # (id, number, type, age, duration)
     ("c6", "+989121110006", "out", D + 3 * H, 0),
     ("c7", "+989121110002", "in", 3 * D, 600),
 ]
+SIMS = [  # (subscription id, slot, name, carrier)
+    (1, 0, "Irancell", "Irancell"),
+    (2, 1, "Hamrah Aval", "MCI"),
+]
+SIM_OF = {  # which SIM each sample message and call used
+    "s1": 1, "s2": 1, "s3": 2, "s4": 2, "s5": 1, "s6": 1, "s7": 2, "s8": 2, "s9": 1,
+    "c1": 1, "c2": 2, "c3": 2, "c4": 2, "c5": 1, "c6": 1, "c7": 2,
+}
 names = {n: c[1] for c in CONTACTS for n in c[2]}
 
 def batches():
+    # Default call line is SIM 1, default message line SIM 2: the iPhone test checks it picks right.
+    yield {"t": "sims", "items": [{"id": i, "slot": s, "name": n, "carrier": c, "number": f"+98912000000{s + 1}"}
+                                  for i, s, n, c in SIMS], "call": 1, "sms": 2}
     yield {"t": "contacts_batch", "items": [{"id": i, "name": n, "numbers": nums} for i, n, nums in CONTACTS]}
     yield {"t": "calls_batch", "items": [{"id": i, "number": num, "name": names.get(num), "type": t,
-                                          "ts": NOW - age, "dur": dur} for i, num, t, age, dur in CALLS]}
+                                          "ts": NOW - age, "dur": dur, "sim": SIM_OF.get(i)}
+                                         for i, num, t, age, dur in CALLS]}
     yield {"t": "sms_batch", "items": [{"id": i, "peer": p, "name": names.get(p), "body": b, "ts": NOW - age,
-                                        "out": o} for i, p, b, age, o in SMS]}
+                                        "out": o, "sim": SIM_OF.get(i)} for i, p, b, age, o in SMS]}
 
 def log(name, obj):
     (OUT / name).open("a").write(json.dumps(obj, ensure_ascii=False) + "\n")
@@ -119,17 +131,17 @@ async def main():
                     if syncs == 1:  # one live message after the first sync -> shows as unread
                         await asyncio.sleep(1)
                         await ws.send(c.seal({"t": "sms", "id": "live1", "peer": "+989121110002", "name": "Sara Karimi",
-                                              "body": "کجایی؟ زنگ بزن", "ts": time.time(), "out": False}))
+                                              "body": "کجایی؟ زنگ بزن", "ts": time.time(), "out": False, "sim": 1}))
                 elif t == "send_sms":
                     if cmd.get("body") == "selftest":
                         (OUT / "selftest_ok").write_text("ok")
                     await ws.send(c.seal({"t": "sms_status", "id": cmd.get("id"), "ok": True}))
                 elif t == "debug_ring":
                     await ws.send(c.seal({"t": "call", "state": "ringing", "number": "+989121110001",
-                                          "name": "Hamed Moradi"}))
+                                          "name": "Hamed Moradi", "sim": 2}))
                 elif t == "answer":
                     await ws.send(c.seal({"t": "call", "state": "active", "number": "+989121110001",
-                                          "name": "Hamed Moradi"}))
+                                          "name": "Hamed Moradi", "sim": 2}))
                     if cmd.get("audio"):
                         await ws.send(c.seal({"t": "audio_start"}))
                         asyncio.ensure_future(stream_tone(ws, c, 30))

@@ -32,6 +32,7 @@ class MainActivity : Activity() {
         add(android.Manifest.permission.READ_SMS)
         add(android.Manifest.permission.SEND_SMS)
         add(android.Manifest.permission.READ_PHONE_STATE)
+        add(android.Manifest.permission.READ_PHONE_NUMBERS)
         add(android.Manifest.permission.READ_CALL_LOG)
         add(android.Manifest.permission.CALL_PHONE)
         add(android.Manifest.permission.ANSWER_PHONE_CALLS)
@@ -129,6 +130,7 @@ class MainActivity : Activity() {
         val missing = permissions.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
             .map { it.substringAfterLast('.').lowercase().replace('_', ' ') }
         if (phoneInfo.isEmpty() && CallTap.ready()) phoneInfo = CallTap.info()
+        val sims = Sims.active(this)
         status.text = "Status: ${BridgeService.status}" +
             (if (missing.isNotEmpty()) "\nMissing permissions: ${missing.joinToString()}" else "") +
             "\nCall sound to iPhone: " + when {
@@ -141,6 +143,7 @@ class MainActivity : Activity() {
                 AdbShell.state.startsWith("error") && !CallTap.ready() -> "\nBuilt-in ADB: ${AdbShell.detail}"
                 else -> ""
             } +
+            (if (sims.isNotEmpty()) "\nSIM cards: " + sims.joinToString("  ·  ") { "${it.slot + 1}: ${it.name}" } else "") +
             (if (phoneInfo.isNotEmpty()) "\nPhone: $phoneInfo" else "") +
             (Prefs.pin(this)?.let { "\nServer pin: ${it.take(16)}…" } ?: "")
         main.postDelayed({ tick() }, 1000)

@@ -10,6 +10,7 @@ class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
         val parts = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
+        val sim = Sims.fromIntent(ctx, intent)
         // One SMS can arrive in several parts; join them per sender.
         parts.groupBy { it.originatingAddress ?: "" }.forEach { (from, msgs) ->
             val body = msgs.joinToString("") { it.messageBody ?: "" }
@@ -21,7 +22,8 @@ class SmsReceiver : BroadcastReceiver() {
                 .put("name", Phone.contactName(ctx, from) ?: JSONObject.NULL)
                 .put("body", body)
                 .put("ts", System.currentTimeMillis() / 1000.0)
-                .put("out", false))
+                .put("out", false)
+                .put("sim", sim ?: JSONObject.NULL))
         }
     }
 }

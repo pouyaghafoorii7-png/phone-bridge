@@ -79,6 +79,7 @@ class BridgeService : Service() {
         goForeground(withMic = true)
         instance = this
         CallTap.prepare(this) // start the Shizuku call line service early, if Shizuku is on
+        simWatch = Sims.watch(this) { main.post { send(Sims.toJson(this)) } } // SIM inserted / removed
         startBluetooth()
         connect()
     }
@@ -136,7 +137,11 @@ class BridgeService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
+    private var simWatch: (() -> Unit)? = null
+
     override fun onDestroy() {
+        simWatch?.invoke()
+        simWatch = null
         stopped = true
         instance = null
         audio?.stop()
@@ -302,17 +307,23 @@ class BridgeService : Service() {
         audio = null
     }
 
+    /** The SIM a command asks for ("sim": subscription id), or null for the phone's default. */
+    private fun simOf(cmd: JSONObject): Int? =
+        if (cmd.has("sim") && !cmd.isNull("sim")) cmd.optInt("sim", -1).takeIf { it > 0 } else null
+
     /** Commands from the iPhone. Only frames under the session key reach this point. */
     private fun handle(cmd: JSONObject) {
         when (cmd.optString("t")) {
+            "sims_sync" -> send(Sims.toJson(this))
             "sync" -> {
+                send(Sims.toJson(this))
                 send(JSONObject().put("t", "contacts_batch").put("items", Phone.contacts(this)))
                 send(JSONObject().put("t", "calls_batch").put("items", Phone.recentCalls(this)))
                 send(JSONObject().put("t", "sms_batch").put("items", Phone.recentSms(this)))
             }
             "calls_sync" -> send(JSONObject().put("t", "calls_batch").put("items", Phone.recentCalls(this)))
             "send_sms" -> {
-                val ok = Phone.sendSms(this, cmd.optString("to"), cmd.optString("body"))
+                val ok = Phone.sendSms(this, cmd.optString("to"), cmd.optString("body"), simOf(cmd))
                 send(JSONObject().put("t", "sms_status").put("id", cmd.optString("id")).put("ok", ok))
             }
             "answer" -> {
@@ -327,13 +338,15 @@ class BridgeService : Service() {
             "dial" -> {
                 val number = cmd.optString("number")
                 audioWanted = cmd.optBoolean("audio")
-                if (Phone.dial(this, number)) {
+                val sim = simOf(cmd)
+                if (Phone.dial(this, number, sim)) {
                     send(JSONObject().put("t", "call").put("state", "dialing")
-                        .put("number", number).put("name", Phone.contactName(this, number) ?: JSONObject.NULL))
+                        .put("number", number).put("name", Phone.contactName(this, number) ?: JSONObject.NULL)
+                        .put("sim", sim ?: JSONObject.NULL))
                 }
             }
             "forward" -> {
-                val ok = Phone.forward(this, cmd.optString("mode"), cmd.optString("number"))
+                val ok = Phone.forward(this, cmd.optString("mode"), cmd.optString("number"), simOf(cmd))
                 send(JSONObject().put("t", "forward_status").put("mode", cmd.optString("mode")).put("ok", ok))
             }
         }

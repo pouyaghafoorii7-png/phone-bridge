@@ -12,6 +12,8 @@ struct SMS: Codable, Identifiable, Hashable {
     var ts: Double
     var out: Bool
     var failed: Bool? = nil
+    /// The SIM (line) of the Android phone this message used. Missing on old data and single-SIM phones.
+    var sim: Int? = nil
 
     var threadKey: String { phoneKey(peer) }
     var date: Date { Date(timeIntervalSince1970: ts) }
@@ -24,6 +26,7 @@ struct CallEntry: Codable, Identifiable, Hashable {
     var type: String      // in | out | missed | rejected
     var ts: Double
     var dur: Double
+    var sim: Int? = nil   // the line of the Android phone
 
     var date: Date { Date(timeIntervalSince1970: ts) }
     var isMissed: Bool { type == "missed" }
@@ -48,6 +51,15 @@ struct CallInfo: Equatable {
     var number: String
     var name: String?
     var started: Date?
+    var sim: Int? = nil   // the line of the Android phone
+}
+
+/// One SIM card of the Android phone, shown like an iPhone "line".
+struct SimLine: Codable, Identifiable, Hashable {
+    var id: Int          // Android's subscription id
+    var slot: Int        // 0 = first slot
+    var name: String     // the SIM's name on the Android phone
+    var number: String
 }
 
 /// Same person whether written +98912…, 0912… or 912…
@@ -69,6 +81,10 @@ private struct Snapshot: Codable {
     var calls: [CallEntry] = []
     var contacts: [Contact] = []
     var lastRead: [String: Double] = [:]
+    // Optional so a file saved before dual SIM still loads.
+    var lines: [SimLine]? = nil
+    var androidCallLine: Int? = nil
+    var androidSmsLine: Int? = nil
 }
 
 // MARK: - Store
@@ -83,6 +99,34 @@ final class BridgeStore: ObservableObject {
     @Published private(set) var contacts: [Contact] = []
     @Published private(set) var lastRead: [String: Double] = [:]
     @Published var call: CallInfo?
+
+    // MARK: dual SIM
+    /// The SIM cards of the Android phone, in slot order. With two or more, the screens show lines.
+    @Published private(set) var lines: [SimLine] = []
+    /// The Android phone's own default lines (nil = it asks every time).
+    @Published private(set) var androidCallLine: Int?
+    @Published private(set) var androidSmsLine: Int?
+    /// Default lines chosen on this iPhone (nil = same as the Android phone).
+    @Published var voiceLineChoice: Int? = UserDefaults.standard.object(forKey: "voiceLine") as? Int {
+        didSet { UserDefaults.standard.set(voiceLineChoice, forKey: "voiceLine") }
+    }
+    @Published var smsLineChoice: Int? = UserDefaults.standard.object(forKey: "smsLine") as? Int {
+        didSet { UserDefaults.standard.set(smsLineChoice, forKey: "smsLine") }
+    }
+    /// Names you gave the lines ("Personal", "Work"), like the iPhone's cellular plan labels.
+    @Published var lineNames: [Int: String] = BridgeStore.loadLineNames() {
+        didSet {
+            UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: lineNames.map { (String($0.key), $0.value) }), forKey: "lineNames")
+        }
+    }
+    /// The line used last for a number in this session (the call log covers earlier calls).
+    private var lastLine: [String: Int] = [:]
+    private var simTestDone = false
+
+    private static func loadLineNames() -> [Int: String] {
+        let raw = UserDefaults.standard.dictionary(forKey: "lineNames") as? [String: String] ?? [:]
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in Int(k).map { ($0, v) } })
+    }
     @Published var forwardStatus: String?
     @Published var myNumber: String = UserDefaults.standard.string(forKey: "myNumber") ?? "" {
         didSet { UserDefaults.standard.set(myNumber, forKey: "myNumber") }
@@ -147,6 +191,9 @@ final class BridgeStore: ObservableObject {
         calls = snap.calls
         contacts = snap.contacts
         lastRead = snap.lastRead
+        lines = snap.lines ?? []
+        androidCallLine = snap.androidCallLine
+        androidSmsLine = snap.androidSmsLine
         rebuildNames()
         if let p = Self.launchPairing {
             use(p)
@@ -162,7 +209,7 @@ final class BridgeStore: ObservableObject {
 
     func pair(with p: Pairing) {
         Keychain.save(p)
-        messages = []; calls = []; contacts = []; lastRead = [:]
+        messages = []; calls = []; contacts = []; lastRead = [:]; lines = []; androidCallLine = nil; androidSmsLine = nil
         save()
         use(p)
     }
@@ -177,7 +224,7 @@ final class BridgeStore: ObservableObject {
         bleUp = false
         Keychain.delete()
         pairing = nil
-        messages = []; calls = []; contacts = []; lastRead = [:]
+        messages = []; calls = []; contacts = []; lastRead = [:]; lines = []; androidCallLine = nil; androidSmsLine = nil
         call = nil
         save()
     }
@@ -280,6 +327,12 @@ final class BridgeStore: ObservableObject {
             let firstSync = messages.isEmpty && lastRead.isEmpty
             // The Android inbox is the source of truth; keep only local items newer than it.
             messages = items + messages.filter { $0.ts > newest && !$0.id.hasPrefix("s") }
+            if testMode && !simTestDone && lines.count > 1 && UserDefaults.standard.bool(forKey: "simTest") {
+                // Automated test only: a message and a call must pick their lines on their own.
+                simTestDone = true
+                sendSMS(to: "+15550100", body: "simtest")
+                dial("+989121110001")
+            }
             if firstSync {
                 // Do not mark the whole history as unread on first pairing.
                 for m in messages { lastRead[m.threadKey] = max(lastRead[m.threadKey] ?? 0, m.ts) }
@@ -287,6 +340,21 @@ final class BridgeStore: ObservableObject {
             save()
         case "calls_batch":
             calls = (msg["items"] as? [[String: Any]] ?? []).compactMap(Self.callEntry(from:))
+            save()
+        case "sims":
+            let items = (msg["items"] as? [[String: Any]] ?? []).compactMap { d -> SimLine? in
+                guard let id = (d["id"] as? NSNumber)?.intValue else { return nil }
+                let slot = (d["slot"] as? NSNumber)?.intValue ?? 0
+                let carrier = d["carrier"] as? String ?? ""
+                let given = (d["name"] as? String) ?? ""
+                let name = !given.isEmpty ? given : (!carrier.isEmpty ? carrier : "SIM \(slot + 1)")
+                return SimLine(id: id, slot: slot, name: name, number: d["number"] as? String ?? "")
+            }
+            lines = items.sorted { $0.slot < $1.slot }
+            androidCallLine = (msg["call"] as? NSNumber)?.intValue
+            androidSmsLine = (msg["sms"] as? NSNumber)?.intValue
+            if let c = voiceLineChoice, line(c) == nil { voiceLineChoice = nil }
+            if let s = smsLineChoice, line(s) == nil { smsLineChoice = nil }
             save()
         case "contacts_batch":
             contacts = (msg["items"] as? [[String: Any]] ?? []).compactMap { d in
@@ -316,8 +384,14 @@ final class BridgeStore: ObservableObject {
             } else {
                 let started = state == "active" ? (call?.started ?? Date()) : nil
                 let isNewRing = state == "ringing" && call?.state != "ringing"
-                call = CallInfo(state: state, number: number, name: name ?? call?.name, started: started)
-                if isNewRing { ring(number: number, name: displayName(number, fallback: name)) }
+                let sim = (msg["sim"] as? NSNumber)?.intValue ?? call?.sim
+                call = CallInfo(state: state, number: number, name: name ?? call?.name, started: started, sim: sim)
+                if let sim { lastLine[phoneKey(number)] = sim }
+                if isNewRing {
+                    // The native call screen shows the line too, so you know which SIM is ringing.
+                    let line = hasLines ? lineName(sim) : nil
+                    ring(number: number, name: displayName(number, fallback: name) + (line.map { " · \($0)" } ?? ""))
+                }
                 if state == "active" { callKit?.connected() }
             }
         case "audio_start":
@@ -343,7 +417,8 @@ final class BridgeStore: ObservableObject {
         guard let id = m["id"] as? String, let peer = m["peer"] as? String else { return nil }
         return SMS(id: id, peer: peer, name: m["name"] as? String, body: m["body"] as? String ?? "",
                    ts: (m["ts"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970,
-                   out: m["out"] as? Bool ?? false)
+                   out: m["out"] as? Bool ?? false,
+                   sim: (m["sim"] as? NSNumber)?.intValue)
     }
 
     private static func callEntry(from m: [String: Any]) -> CallEntry? {
@@ -351,7 +426,8 @@ final class BridgeStore: ObservableObject {
         return CallEntry(id: id, number: m["number"] as? String ?? "", name: m["name"] as? String,
                          type: m["type"] as? String ?? "in",
                          ts: (m["ts"] as? NSNumber)?.doubleValue ?? 0,
-                         dur: (m["dur"] as? NSNumber)?.doubleValue ?? 0)
+                         dur: (m["dur"] as? NSNumber)?.doubleValue ?? 0,
+                         sim: (m["sim"] as? NSNumber)?.intValue)
     }
 
     // MARK: commands
@@ -378,14 +454,64 @@ final class BridgeStore: ObservableObject {
         runSelfTest()
     }
 
-    func sendSMS(to peer: String, body: String) {
+    /// Sends a message. With two SIMs it goes from `line`, else from the line this chat used last.
+    func sendSMS(to peer: String, body: String, line: Int? = nil) {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !peer.isEmpty else { return }
         let id = "o-" + UUID().uuidString
-        messages.append(SMS(id: id, peer: peer, name: nil, body: text, ts: Date().timeIntervalSince1970, out: true))
+        let sim = hasLines ? (line ?? lineForSMS(to: peer)) : nil
+        messages.append(SMS(id: id, peer: peer, name: nil, body: text, ts: Date().timeIntervalSince1970, out: true, sim: sim))
         markRead(phoneKey(peer))
         save()
-        send(["t": "send_sms", "to": peer, "body": text, "id": id])
+        var cmd: [String: Any] = ["t": "send_sms", "to": peer, "body": text, "id": id]
+        if let sim { cmd["sim"] = sim }
+        send(cmd)
+    }
+
+    // MARK: lines
+
+    /// Two or more SIMs: only then do the screens talk about lines.
+    var hasLines: Bool { lines.count > 1 }
+
+    func line(_ id: Int?) -> SimLine? {
+        guard let id else { return nil }
+        return lines.first { $0.id == id }
+    }
+
+    /// What a line is called: the name you gave it, else its name on the Android phone.
+    func lineName(_ id: Int?) -> String? {
+        guard let l = line(id) else { return nil }
+        let custom = (lineNames[l.id] ?? "").trimmingCharacters(in: .whitespaces)
+        return custom.isEmpty ? l.name : custom
+    }
+
+    /// The line for new calls: your choice, else the Android phone's default, else the first SIM.
+    var defaultCallLine: Int? {
+        guard hasLines else { return nil }
+        return [voiceLineChoice, androidCallLine].compactMap { $0 }.first { line($0) != nil } ?? lines.first?.id
+    }
+
+    var defaultSMSLine: Int? {
+        guard hasLines else { return nil }
+        return [smsLineChoice, androidSmsLine].compactMap { $0 }.first { line($0) != nil } ?? lines.first?.id
+    }
+
+    /// Like the iPhone: a call goes out on the line used last with that number, else the default line.
+    func lineForCall(to number: String) -> Int? {
+        guard hasLines else { return nil }
+        let key = phoneKey(number)
+        if !number.isEmpty {
+            if let id = lastLine[key], line(id) != nil { return id }
+            if let id = calls.first(where: { phoneKey($0.number) == key && line($0.sim) != nil })?.sim { return id }
+        }
+        return defaultCallLine
+    }
+
+    /// A reply goes out on the line the chat already uses, else the default message line.
+    func lineForSMS(to peer: String) -> Int? {
+        guard hasLines else { return nil }
+        if let id = thread(phoneKey(peer)).last(where: { line($0.sim) != nil })?.sim { return id }
+        return defaultSMSLine
     }
 
     // MARK: calls
@@ -402,7 +528,7 @@ final class BridgeStore: ObservableObject {
         }
         ck.onStartOutgoing = { [weak self] number in
             guard let self else { return }
-            self.send(["t": "dial", "number": number, "audio": self.internetAudio])
+            self.send(self.dialCommand(number, sim: self.call?.sim))
         }
         ck.onMute = { [weak self] m in self?.muted = m }
         ck.onAudioSession = { [weak self] active in
@@ -464,20 +590,29 @@ final class BridgeStore: ObservableObject {
         }
     }
 
-    func dial(_ number: String) {
+    /// Places a call. With two SIMs it uses `line`, else the usual line for that number.
+    func dial(_ number: String, line: Int? = nil) {
         let n = number.trimmingCharacters(in: .whitespaces)
         guard !n.isEmpty else { return }
-        call = CallInfo(state: "dialing", number: n, name: name(for: n), started: nil)
+        let sim = hasLines ? (line ?? lineForCall(to: n)) : nil
+        if let sim { lastLine[phoneKey(n)] = sim }
+        call = CallInfo(state: "dialing", number: n, name: name(for: n), started: nil, sim: sim)
         if let ck = callKit {
             ck.startOutgoing(number: n) { [weak self] ok in
                 guard let self, !ok else { return }
-                self.send(["t": "dial", "number": n, "audio": self.internetAudio])
+                self.send(self.dialCommand(n, sim: sim))
                 if self.internetAudio { self.startAudio(activateSession: true) }
             }
         } else {
-            send(["t": "dial", "number": n, "audio": internetAudio])
+            send(dialCommand(n, sim: sim))
             if internetAudio { startAudio(activateSession: true) }
         }
+    }
+
+    private func dialCommand(_ number: String, sim: Int?) -> [String: Any] {
+        var cmd: [String: Any] = ["t": "dial", "number": number, "audio": internetAudio]
+        if let sim { cmd["sim"] = sim }
+        return cmd
     }
 
     private func startAudio(activateSession: Bool) {
@@ -604,7 +739,8 @@ final class BridgeStore: ObservableObject {
     }
 
     private func save() {
-        let snap = Snapshot(messages: messages, calls: calls, contacts: contacts, lastRead: lastRead)
+        let snap = Snapshot(messages: messages, calls: calls, contacts: contacts, lastRead: lastRead,
+                            lines: lines, androidCallLine: androidCallLine, androidSmsLine: androidSmsLine)
         let url = Self.fileURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(snap) {

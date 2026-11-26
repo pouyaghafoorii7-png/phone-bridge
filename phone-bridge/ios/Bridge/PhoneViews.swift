@@ -6,6 +6,31 @@ struct KeypadView: View {
     @EnvironmentObject var store: BridgeStore
     @State private var number = ""
     @State private var longPressed = false
+    /// A line picked by hand for this number; empty again when the number is cleared.
+    @State private var lineOverride: Int?
+
+    private var currentLine: Int? { store.hasLines ? (lineOverride ?? store.lineForCall(to: number)) : nil }
+
+    /// "Irancell ▾": which line the call goes out on. Tap to switch, like the iPhone's keypad.
+    private var linePill: some View {
+        Menu {
+            ForEach(store.lines) { l in
+                Button { lineOverride = l.id } label: {
+                    Label(store.lineName(l.id) ?? l.name, systemImage: l.id == currentLine ? "checkmark" : "simcard")
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "simcard.fill").font(.system(size: 11))
+                Text(store.lineName(currentLine) ?? " ").font(.footnote.weight(.medium))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(Color(.secondarySystemFill), in: Capsule())
+        }
+        .accessibilityLabel("Calling from")
+    }
 
     private let keys: [(String, String)] = [
         ("1", ""), ("2", "ABC"), ("3", "DEF"),
@@ -19,6 +44,7 @@ struct KeypadView: View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             VStack(spacing: 4) {
+                if store.hasLines { linePill.padding(.bottom, 6) }
                 Text(number.isEmpty ? " " : number)
                     .font(.system(size: 38, weight: .regular))
                     .lineLimit(1)
@@ -67,7 +93,7 @@ struct KeypadView: View {
                         // Like the system keypad: first tap recalls the last number dialled.
                         number = store.calls.first(where: { $0.type == "out" })?.number ?? ""
                     } else {
-                        store.dial(number)
+                        store.dial(number, line: currentLine)
                     }
                 } label: {
                     Image(systemName: "phone.fill")
@@ -93,6 +119,7 @@ struct KeypadView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
+        .onChange(of: number) { if number.isEmpty { lineOverride = nil } }
     }
 }
 
@@ -122,6 +149,13 @@ struct RecentsView: View {
         return out
     }
 
+    /// "mobile", plus the line when there are two SIMs: "mobile · Irancell".
+    private func subtitle(_ c: CallEntry) -> String {
+        let base = store.name(for: c.number) != nil || c.name != nil ? "mobile" : "Unknown"
+        guard store.hasLines, let line = store.lineName(c.sim) else { return base }
+        return base + " · " + line
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             List(groups) { g in
@@ -137,7 +171,7 @@ struct RecentsView: View {
                             .font(.headline)
                             .foregroundStyle(c.isMissed ? Color.red : Color.primary)
                             .lineLimit(1)
-                        Text(store.name(for: c.number) != nil || c.name != nil ? "mobile" : "Unknown")
+                        Text(subtitle(c))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -153,7 +187,7 @@ struct RecentsView: View {
                     .frame(width: 28)
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { store.dial(c.number) }
+                .onTapGesture { store.dial(c.number, line: c.sim) }
             }
             .listStyle(.plain)
             .overlay {
@@ -332,8 +366,7 @@ struct ContactCardView: View {
                                 ActionTile(icon: "message.fill", title: "message")
                             }
                             .buttonStyle(.plain)
-                            Button { store.dial(n) } label: { ActionTile(icon: "phone.fill", title: "call") }
-                                .buttonStyle(.plain)
+                            callTile(n)
                         }
                     }
                     .padding(.top, 6)
@@ -358,7 +391,7 @@ struct ContactCardView: View {
                         HStack {
                             Text(c.date.formatted(date: .abbreviated, time: .shortened))
                             Spacer()
-                            Text(callLabel(c)).foregroundStyle(c.isMissed ? .red : .secondary)
+                            Text(callLabel(c) + lineSuffix(c)).foregroundStyle(c.isMissed ? .red : .secondary)
                         }
                         .font(.subheadline)
                     }
@@ -367,6 +400,33 @@ struct ContactCardView: View {
         }
         .listStyle(.insetGrouped)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Tap calls on the usual line; touch and hold chooses a line (with two SIMs), like the iPhone.
+    @ViewBuilder
+    private func callTile(_ n: String) -> some View {
+        if store.hasLines {
+            Menu {
+                ForEach(store.lines) { l in
+                    Button { store.dial(n, line: l.id) } label: {
+                        Label(store.lineName(l.id) ?? l.name, systemImage: l.id == store.lineForCall(to: n) ? "checkmark" : "simcard")
+                    }
+                }
+            } label: {
+                ActionTile(icon: "phone.fill", title: "call")
+            } primaryAction: {
+                store.dial(n)
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button { store.dial(n) } label: { ActionTile(icon: "phone.fill", title: "call") }
+                .buttonStyle(.plain)
+        }
+    }
+
+    private func lineSuffix(_ c: CallEntry) -> String {
+        guard store.hasLines, let line = store.lineName(c.sim) else { return "" }
+        return " · " + line
     }
 
     private func callLabel(_ c: CallEntry) -> String {
@@ -467,7 +527,7 @@ struct CallView: View {
         HStack(spacing: 6) {
             Image(systemName: store.audioOn ? "lock.fill" : "candybarphone")
                 .font(.system(size: 11, weight: .bold))
-            Text(statusText)
+            Text(statusText).lineLimit(1).minimumScaleFactor(0.8)
         }
         .font(.footnote.weight(.medium))
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -476,11 +536,16 @@ struct CallView: View {
     }
 
     private var statusText: String {
-        guard store.audioOn else { return "via Android" }
-        var t = "Encrypted"
-        if store.audioSource?.hasPrefix("call line") == true { t += " · direct line" }
-        else if store.audioRoute == "cable" { t += " · cable" }
-        return t
+        var parts: [String] = []
+        if store.hasLines, let line = store.lineName(call?.sim) { parts.append(line) } // which SIM
+        if store.audioOn {
+            parts.append("Encrypted")
+            if store.audioSource?.hasPrefix("call line") == true { parts.append("direct line") }
+            else if store.audioRoute == "cable" { parts.append("cable") }
+        } else {
+            parts.append("via Android")
+        }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var status: some View {

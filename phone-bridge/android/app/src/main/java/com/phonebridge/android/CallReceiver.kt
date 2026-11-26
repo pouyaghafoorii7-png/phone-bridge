@@ -10,6 +10,7 @@ class CallReceiver : BroadcastReceiver() {
     companion object {
         private var last = TelephonyManager.EXTRA_STATE_IDLE
         private var lastNumber: String? = null
+        private var lastSim: Int? = null
     }
 
     override fun onReceive(ctx: Context, intent: Intent) {
@@ -27,12 +28,14 @@ class CallReceiver : BroadcastReceiver() {
         last = state
         if (number != null) lastNumber = number
         val n = number ?: lastNumber
+        Sims.fromIntent(ctx, intent)?.let { lastSim = it }
         BridgeService.emit(ctx, JSONObject()
             .put("t", "call")
             .put("state", mapped)
             .put("number", n ?: JSONObject.NULL)
-            .put("name", Phone.contactName(ctx, n) ?: JSONObject.NULL))
+            .put("name", Phone.contactName(ctx, n) ?: JSONObject.NULL)
+            .put("sim", lastSim ?: JSONObject.NULL))
         BridgeService.callState(mapped)
-        if (mapped == "ended") lastNumber = null
+        if (mapped == "ended") { lastNumber = null; lastSim = null }
     }
 }
