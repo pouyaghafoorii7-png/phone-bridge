@@ -13,7 +13,6 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
-import android.os.Process
 import android.util.Log
 import java.io.Closeable
 import java.io.DataInputStream
@@ -86,7 +85,7 @@ class CallTapService() : ICallTap.Stub() {
     //  AIDL
     // =====================================================================================
 
-    override fun uid(): Int = Process.myUid()
+    override fun uid(): Int = android.os.Process.myUid()
 
     override fun route(): String = routeNow
 
