@@ -1,0 +1,10 @@
+android/.gradle/
+android/build/
+android/app/build/
+ios/build/
+ios/Payload/
+ios/*.xcodeproj/
+ios/*.ipa
+ios/Bridge/Info.plist
+ios/screenshots/
+ios/build-sim/
