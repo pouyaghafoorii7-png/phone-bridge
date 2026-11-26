@@ -323,6 +323,7 @@ class BridgeService : Service() {
                 Phone.hangup(this)
                 stopAudio()
             }
+            "dtmf" -> audio?.playTone(cmd.optString("digit"))
             "dial" -> {
                 val number = cmd.optString("number")
                 audioWanted = cmd.optBoolean("audio")

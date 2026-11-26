@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Built-in ADB over wireless debugging: mDNS discovery of the phone's own ADB port. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -60,6 +63,16 @@
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- The ADB-started shell process hands the call-line binder back through this provider
+             (built-in ADB path, ShellMain.kt). Only a shell process (uid 2000) can reach it. -->
+        <provider
+            android:name=".ShellBinderProvider"
+            android:authorities="${applicationId}.shell"
             android:enabled="true"
             android:exported="true"
             android:multiprocess="false"

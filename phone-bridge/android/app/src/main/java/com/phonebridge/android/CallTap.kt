@@ -14,17 +14,22 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * The app side of the direct call line (the iTell method). Shizuku runs CallTapService with the shell
- * identity; Shizuku itself is started one time with ADB (USB or wireless debugging) or root.
- * Without Shizuku, AudioBridge uses the microphone as before.
+ * The app side of the direct call line (the iTell method). The call-line service runs with the shell
+ * identity either through the app's own built-in ADB over wireless debugging (AdbShell, no second
+ * app) or through Shizuku. CallTap uses whichever is ready. Without either, AudioBridge falls back
+ * to the microphone.
  */
 object CallTap {
     private const val TAG = "PB-CallTap"
     const val REQUEST = 4721
 
-    @Volatile private var service: ICallTap? = null
+    @Volatile private var service: ICallTap? = null // the Shizuku-bound service (ADB is in AdbShell)
     private var bound = false
     private var appCtx: Context? = null
+
+    /** The live service, from built-in ADB first, else Shizuku. */
+    private fun svc(): ICallTap? =
+        AdbShell.service() ?: service?.takeIf { it.asBinder().pingBinder() }
 
     private val args by lazy {
         Shizuku.UserServiceArgs(ComponentName(BuildConfig.APPLICATION_ID, CallTapService::class.java.name))
@@ -59,17 +64,26 @@ object CallTap {
         Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
     } catch (_: Throwable) { false }
 
-    fun ready(): Boolean = service != null
+    fun ready(): Boolean = svc() != null
 
     /** The uid the call line service runs with (2000 = shell), or -1. */
-    fun serviceUid(): Int = try { service?.uid() ?: -1 } catch (_: Exception) { -1 }
+    fun serviceUid(): Int = try { svc()?.uid() ?: -1 } catch (_: Exception) { -1 }
+
+    /** How the call line is set up, for the screens. */
+    fun transport(): String = when {
+        AdbShell.ready() -> "adb"
+        service != null -> "shizuku"
+        else -> ""
+    }
 
     /** One word for the screens: "missing", "denied", "starting" or "ready". */
     fun state(): String = when {
-        !running() -> "missing"
-        !granted() -> "denied"
-        service == null -> "starting"
-        else -> "ready"
+        svc() != null -> "ready"
+        AdbShell.state == "connecting" || AdbShell.state == "starting" || AdbShell.state == "pairing" -> "starting"
+        running() && !granted() -> "denied"
+        running() -> "starting"
+        AdbShell.state.startsWith("error") -> "denied"
+        else -> "missing"
     }
 
     /** Shows the Shizuku permission dialog. */
@@ -101,18 +115,18 @@ object CallTap {
 
     /** The service's methods for this phone, best first (empty when the service is not there). */
     fun methods(): List<String> = try {
-        service?.methods()?.split(',')?.filter { it.isNotBlank() } ?: emptyList()
+        svc()?.methods()?.split(',')?.filter { it.isNotBlank() } ?: emptyList()
     } catch (_: Exception) { emptyList() }
 
     /** One line about the phone (maker, Android, chip, what the call line offers). */
-    fun info(): String = try { service?.info() ?: "" } catch (_: Exception) { "" }
+    fun info(): String = try { svc()?.info() ?: "" } catch (_: Exception) { "" }
 
     /**
      * Opens the call line with one method: the caller's voice comes out of [CallLine.read], the
      * iPhone voice goes in with [CallLine.send]. Returns null and the reason when the phone refuses.
      */
     fun openLine(method: String): Pair<CallLine?, String> {
-        val s = service ?: return null to state()
+        val s = svc() ?: return null to state()
         val down = ParcelFileDescriptor.createPipe()
         val up = if (CallTapService.carriesUplink(method)) ParcelFileDescriptor.createPipe() else null
         val why = try {

@@ -449,6 +449,11 @@ final class BridgeStore: ObservableObject {
         if internetAudio { startAudio(activateSession: true) }
     }
 
+    /// Sends one DTMF key to the live call (best effort; some phones block it from a non-default dialer).
+    func sendDTMF(_ digit: String) {
+        send(["t": "dtmf", "digit": digit])
+    }
+
     func hangup() {
         if let ck = callKit, ck.current != nil {
             ck.endFromApp()

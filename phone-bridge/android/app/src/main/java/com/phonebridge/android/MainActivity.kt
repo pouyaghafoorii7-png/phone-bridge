@@ -68,7 +68,8 @@ class MainActivity : Activity() {
         button("4. Call sound to iPhone: turn on “Ghafoorii call audio”") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
-        button("4b. Clean call sound: direct call line (Shizuku)") { openShizuku() }
+        button("4b. Clean call sound: direct call line (no extra app)") { openCleanLine() }
+        button("4c. Clean call sound with Shizuku (other way)") { openShizuku() }
         lateinit var methodButton: Button
         methodButton = button(methodLabel()) {
             // Like iTell's method list: automatic, or one method by hand when automatic picks badly.
@@ -131,13 +132,13 @@ class MainActivity : Activity() {
         status.text = "Status: ${BridgeService.status}" +
             (if (missing.isNotEmpty()) "\nMissing permissions: ${missing.joinToString()}" else "") +
             "\nCall sound to iPhone: " + when {
-                CallTap.ready() -> "direct call line, both directions (Shizuku)"
+                CallTap.ready() -> "direct call line, both directions (" +
+                    (if (CallTap.transport() == "adb") "built-in" else "Shizuku") + ")"
                 CallAudioAccess.enabled(this) -> "microphone (step 4b gives clean sound)"
                 else -> "off (step 4 or 4b)"
-            } + when (CallTap.state()) {
-                "missing" -> ""
-                "denied" -> "\nShizuku: runs, but Ghafoorii is not allowed (tap 4b)"
-                "starting" -> "\nShizuku: starting the call line service…"
+            } + when {
+                CallTap.state() == "starting" -> "\nStarting the call line service…"
+                AdbShell.state.startsWith("error") && !CallTap.ready() -> "\nBuilt-in ADB: ${AdbShell.detail}"
                 else -> ""
             } +
             (if (phoneInfo.isNotEmpty()) "\nPhone: $phoneInfo" else "") +
@@ -155,7 +156,66 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Step 4b. Shizuku runs our call line service with the shell identity (like `adb shell`).
+     * Step 4b. The built-in way, like iTell: the app pairs with its own phone over wireless debugging
+     * and starts the call-line service itself, with no second app. Android 11+.
+     */
+    private fun openCleanLine() {
+        if (CallTap.ready()) { status.text = "Clean call line is already on."; return }
+        if (Build.VERSION.SDK_INT < 30) {
+            status.text = "The built-in way needs Android 11+. Use 4c (Shizuku) instead."
+            return
+        }
+        status.text = "Connecting over wireless debugging…"
+        AdbShell.connect(this) { ok, why ->
+            main.post {
+                when {
+                    ok -> { status.text = "Clean call line is on."; phoneInfo = CallTap.info() }
+                    why == "not paired" -> pairDialog()
+                    else -> status.text = "Could not connect ($why).\nTurn on Wireless debugging and tap 4b, or use 4c (Shizuku)."
+                }
+            }
+        }
+    }
+
+    /** First-time pairing: the user turns on wireless debugging and types the port and 6-digit code. */
+    private fun pairDialog() {
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, 0) }
+        box.addView(TextView(this).apply {
+            text = "1. Settings → Developer options → Wireless debugging: turn ON.\n" +
+                "2. Tap “Pair device with pairing code”.\n" +
+                "3. Type the port and the 6-digit code it shows."
+        })
+        val openDev = Button(this).apply { text = "Open Developer options"; setOnClickListener {
+            try { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } catch (_: Exception) {}
+        } }
+        box.addView(openDev)
+        val port = EditText(this).apply { hint = "Pairing port (e.g. 37123)"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setSingleLine() }
+        val code = EditText(this).apply { hint = "6-digit pairing code"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setSingleLine() }
+        box.addView(port); box.addView(code)
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Pair this phone")
+            .setView(box)
+            .setPositiveButton("Pair & connect") { _, _ ->
+                val p = port.text.toString().trim().toIntOrNull()
+                val c = code.text.toString().trim()
+                if (p == null || c.length < 6) { status.text = "Enter the pairing port and the 6-digit code."; return@setPositiveButton }
+                status.text = "Pairing…"
+                AdbShell.pair(this, p, c) { ok, why ->
+                    main.post {
+                        if (!ok) { status.text = "Pairing failed ($why). Check the port and code and try again."; return@post }
+                        status.text = "Paired. Connecting…"
+                        openCleanLine()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Step 4c. Shizuku runs our call line service with the shell identity (like `adb shell`).
      * Shizuku itself is started one time with wireless debugging (Android 11+) or a computer (ADB).
      */
     private fun openShizuku() {

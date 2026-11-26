@@ -408,90 +408,82 @@ struct EmptyState: View {
 
 // MARK: - In-call screen
 
+/// The call screen, in the style of the iOS 26 Phone app: a dark backdrop tinted from the caller's
+/// avatar, the name high up in light weight, a grid of Liquid Glass round buttons, End below.
 struct CallView: View {
     @EnvironmentObject var store: BridgeStore
+    @State private var showKeypad = false
+
+    private var call: CallInfo? { store.call }
+    private var ringing: Bool { call?.state == "ringing" }
+    private var name: String { call.map { store.displayName($0.number, fallback: $0.name) } ?? "" }
 
     var body: some View {
-        let call = store.call
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: store.audioOn ? "lock.fill" : "candybarphone")
-                Text(store.audioOn ? "Encrypted · via Android" + (store.audioSource?.hasPrefix("call line") == true ? " · direct line" : "")
-                     + (store.audioRoute == "cable" ? " · cable" : "") : "via Android")
-            }
-            .font(.footnote.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.white.opacity(0.14), in: Capsule())
-            .padding(.top, 12)
+        ZStack {
+            CallBackdrop(seed: name)
 
-            Spacer().frame(height: 70)
-            AvatarView(name: call.flatMap { store.name(for: $0.number) ?? $0.name }, size: 104)
-            Text(call.map { store.displayName($0.number, fallback: $0.name) } ?? "")
-                .font(.system(size: 34, weight: .regular))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
-                .padding(.top, 18)
-                .padding(.horizontal, 24)
-            status(call)
-                .font(.title3)
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.top, 6)
+            VStack(spacing: 0) {
+                statusPill
+                    .padding(.top, 14)
 
-            Spacer()
+                Spacer().frame(height: 48)
 
-            if let problem = store.audioProblem {
-                Label(problem, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.yellow)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                    .padding(.bottom, 24)
-            } else if !store.internetAudio && store.forwardMode == "off" {
-                Text("Call sound is on the Android phone. Turn on call sound over the internet or call forwarding in Settings.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 36)
-            }
+                AvatarView(name: call.flatMap { store.name(for: $0.number) ?? $0.name }, size: 96)
+                    .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
 
-            if call?.state != "ringing" && store.audioOn {
-                HStack(spacing: 44) {
-                    toggleButton(icon: store.muted ? "mic.slash.fill" : "mic.slash", label: "mute", on: store.muted) {
-                        store.muted.toggle()
-                    }
-                    toggleButton(icon: "speaker.wave.3.fill", label: "speaker", on: store.speaker) {
-                        store.speaker.toggle()
-                    }
+                Text(name)
+                    .font(.system(size: 36, weight: .light))
+                    .tracking(0.2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .padding(.top, 16)
+                    .padding(.horizontal, 24)
+
+                status
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.top, 4)
+
+                Spacer()
+
+                hint
+
+                if !ringing && store.audioOn {
+                    controlGrid
+                        .padding(.horizontal, 36)
+                        .padding(.bottom, 28)
                 }
-                .padding(.bottom, 40)
-            }
 
-            if call?.state == "ringing" {
-                HStack {
-                    roundButton(icon: "phone.down.fill", color: .red, label: "Decline") { store.hangup() }
-                    Spacer()
-                    roundButton(icon: "phone.fill", color: .green, label: "Accept") { store.answer() }
-                }
-                .padding(.horizontal, 48)
-            } else {
-                roundButton(icon: "phone.down.fill", color: .red, label: "End") { store.hangup() }
+                bottomRow
+                    .padding(.horizontal, ringing ? 52 : 36)
+                    .padding(.bottom, 44)
             }
-            Spacer().frame(height: 56)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(.white)
-        .background(
-            LinearGradient(colors: [Color(red: 0.16, green: 0.33, blue: 0.27), Color(red: 0.05, green: 0.09, blue: 0.08)],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-        )
+        .sheet(isPresented: $showKeypad) { InCallKeypad(name: name).environmentObject(store) }
     }
 
-    @ViewBuilder
-    private func status(_ call: CallInfo?) -> some View {
+    private var statusPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: store.audioOn ? "lock.fill" : "candybarphone")
+                .font(.system(size: 11, weight: .bold))
+            Text(statusText)
+        }
+        .font(.footnote.weight(.medium))
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
+    }
+
+    private var statusText: String {
+        guard store.audioOn else { return "via Android" }
+        var t = "Encrypted"
+        if store.audioSource?.hasPrefix("call line") == true { t += " · direct line" }
+        else if store.audioRoute == "cable" { t += " · cable" }
+        return t
+    }
+
+    @ViewBuilder private var status: some View {
         switch call?.state {
         case "ringing": Text("mobile")
         case "dialing": Text("calling…")
@@ -501,40 +493,207 @@ struct CallView: View {
                     Text(Duration.seconds(ctx.date.timeIntervalSince(start)).formatted(.time(pattern: .minuteSecond)))
                         .monospacedDigit()
                 }
-            } else {
-                Text("connected")
-            }
+            } else { Text("connected") }
         default: Text(" ")
         }
     }
 
-    private func toggleButton(icon: String, label: String, on: Bool, action: @escaping () -> Void) -> some View {
-        VStack(spacing: 8) {
-            Button(action: action) {
-                Image(systemName: icon)
-                    .font(.system(size: 28))
-                    .foregroundStyle(on ? Color.black : Color.white)
-                    .frame(width: 78, height: 78)
-                    .background(Circle().fill(on ? Color.white : Color.white.opacity(0.18)))
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel(label)
-            .accessibilityAddTraits(on ? .isSelected : [])
-            Text(label).font(.footnote)
+    @ViewBuilder private var hint: some View {
+        if let problem = store.audioProblem {
+            Label(problem, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote).foregroundStyle(.yellow)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32).padding(.bottom, 22)
+        } else if !store.internetAudio && store.forwardMode == "off" {
+            Text("Call sound is on the Android phone. Turn on call sound over the internet or call forwarding in Settings.")
+                .font(.footnote).foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40).padding(.bottom, 28)
         }
     }
 
-    private func roundButton(icon: String, color: Color, label: String, action: @escaping () -> Void) -> some View {
-        VStack(spacing: 8) {
+    /// The iOS 2×3 control grid. Mute, Keypad and Audio are wired; the rest match the look.
+    private var controlGrid: some View {
+        Grid(horizontalSpacing: 28, verticalSpacing: 20) {
+            GridRow {
+                CallButton(icon: store.muted ? "mic.slash.fill" : "mic.slash", label: "mute", on: store.muted) { store.muted.toggle() }
+                CallButton(icon: "circle.grid.3x3.fill", label: "keypad") { showKeypad = true }
+                CallButton(icon: store.speaker ? "speaker.wave.3.fill" : "speaker.wave.2.fill",
+                           label: store.audioRoute == "cable" ? "cable" : "audio", on: store.speaker) { store.speaker.toggle() }
+            }
+            GridRow {
+                CallButton(icon: "plus", label: "add", enabled: false) {}
+                CallButton(icon: "video.fill", label: "FaceTime", enabled: false) {}
+                CallButton(icon: "person.crop.circle", label: "contact", enabled: store.name(for: call?.number ?? "") != nil) {
+                    openPart(.phone, tab: .contacts)
+                    store.call = nil
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var bottomRow: some View {
+        if ringing {
+            HStack {
+                CallEndButton(icon: "phone.down.fill", color: .red, label: "Decline") { store.hangup() }
+                Spacer()
+                CallEndButton(icon: "phone.fill", color: Color(red: 0.2, green: 0.78, blue: 0.35), label: "Accept") { store.answer() }
+            }
+        } else {
+            HStack { Spacer(); CallEndButton(icon: "phone.down.fill", color: .red, label: "") { store.hangup() }; Spacer() }
+        }
+    }
+}
+
+/// A dark call backdrop tinted from the caller's name, blurred like the iOS contact-photo background.
+private struct CallBackdrop: View {
+    let seed: String
+
+    var body: some View {
+        let h = Double(abs(seed.hashValue) % 360) / 360
+        let tint = Color(hue: h, saturation: 0.5, brightness: 0.5)
+        ZStack {
+            Color.black
+            RadialGradient(colors: [tint.opacity(0.55), .clear], center: .init(x: 0.5, y: 0.32),
+                           startRadius: 0, endRadius: 520)
+            LinearGradient(colors: [.white.opacity(0.05), .clear, .black.opacity(0.45)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+/// A round Liquid Glass control button (iOS 26 look), with a label underneath.
+private struct CallButton: View {
+    let icon: String
+    let label: String
+    var on: Bool = false
+    var enabled: Bool = true
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 9) {
             Button(action: action) {
                 Image(systemName: icon)
-                    .font(.system(size: 32))
-                    .foregroundStyle(.white)
-                    .frame(width: 78, height: 78)
-                    .background(Circle().fill(color))
+                    .font(.system(size: 27, weight: .regular))
+                    .foregroundStyle(on ? .black : .white)
+                    .frame(width: 74, height: 74)
+                    .modifier(CallGlass(on: on))
             }
             .buttonStyle(PressStyle())
-            Text(label).font(.footnote)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.35)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(height: 16)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// The big round End / Accept / Decline button.
+private struct CallEndButton: View {
+    let icon: String
+    let color: Color
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 9) {
+            Button(action: action) {
+                Image(systemName: icon)
+                    .font(.system(size: 31, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 74, height: 74)
+                    .background(Circle().fill(color))
+                    .shadow(color: color.opacity(0.5), radius: 12, y: 4)
+            }
+            .buttonStyle(PressStyle())
+            if !label.isEmpty { Text(label).font(.system(size: 13)).foregroundStyle(.white.opacity(0.9)) }
+        }
+        .accessibilityLabel(label.isEmpty ? "End call" : label)
+    }
+}
+
+/// Liquid Glass on iOS 26, a soft translucent circle before that; white when the control is on.
+private struct CallGlass: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on {
+            content.background(Circle().fill(.white))
+        } else {
+            #if compiler(>=6.2)
+            if #available(iOS 26.0, *) {
+                content.glassEffect(.regular.interactive(), in: Circle())
+            } else {
+                content.background(Circle().fill(.ultraThinMaterial))
+                    .overlay(Circle().strokeBorder(.white.opacity(0.14)))
+            }
+            #else
+            content.background(Circle().fill(.ultraThinMaterial))
+                .overlay(Circle().strokeBorder(.white.opacity(0.14)))
+            #endif
+        }
+    }
+}
+
+/// An in-call number pad, shown when Keypad is tapped. Sends DTMF tones when the phone supports it.
+private struct InCallKeypad: View {
+    @EnvironmentObject var store: BridgeStore
+    @Environment(\.dismiss) private var dismiss
+    let name: String
+    @State private var typed = ""
+
+    private let keys = [["1","2","3"],["4","5","6"],["7","8","9"],["*","0","#"]]
+    private let letters = ["2":"ABC","3":"DEF","4":"GHI","5":"JKL","6":"MNO","7":"PQRS","8":"TUV","9":"WXYZ","0":"+"]
+
+    var body: some View {
+        ZStack {
+            CallBackdrop(seed: name).opacity(0.9)
+            VStack(spacing: 0) {
+                Text(typed.isEmpty ? name : typed)
+                    .font(.system(size: 32, weight: .light)).lineLimit(1).minimumScaleFactor(0.5)
+                    .padding(.top, 40).padding(.horizontal, 24)
+                Spacer()
+                VStack(spacing: 18) {
+                    ForEach(keys, id: \.self) { row in
+                        HStack(spacing: 28) {
+                            ForEach(row, id: \.self) { k in
+                                Button { tap(k) } label: {
+                                    VStack(spacing: 1) {
+                                        Text(k).font(.system(size: 34, weight: .regular))
+                                        Text(letters[k] ?? " ").font(.system(size: 10, weight: .semibold)).tracking(1)
+                                            .frame(height: 10)
+                                    }
+                                    .foregroundStyle(.white)
+                                    .frame(width: 74, height: 74)
+                                    .modifier(CallGlass(on: false))
+                                }
+                                .buttonStyle(PressStyle())
+                            }
+                        }
+                    }
+                }
+                Spacer()
+                HStack {
+                    Spacer()
+                    CallEndButton(icon: "phone.down.fill", color: .red, label: "") { store.hangup(); dismiss() }
+                    Spacer()
+                }
+                .overlay(alignment: .trailing) {
+                    Button("Hide") { dismiss() }.foregroundStyle(.white).padding(.trailing, 36)
+                }
+                .padding(.bottom, 44)
+            }
+            .foregroundStyle(.white)
+        }
+    }
+
+    private func tap(_ k: String) {
+        typed.append(k)
+        store.sendDTMF(k)
     }
 }

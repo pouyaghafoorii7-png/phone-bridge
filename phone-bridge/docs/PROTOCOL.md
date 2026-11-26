@@ -29,6 +29,8 @@ On `#peer:1` from the relay each side makes a new ephemeral key and sends
 if `r` is false, answer `{"t":"hello","e":pub,"r":true}`.
 
 ## Call audio
+`{"t":"dtmf","digit":"5"}` iPhone → Android: play one keypad tone into the live call.
+
 `{"t":"au","d":base64}` session frames, 16 kHz mono G.711 mu-law, 640 samples (40 ms).
 
 Android to iPhone, about the call sound (no reply needed):

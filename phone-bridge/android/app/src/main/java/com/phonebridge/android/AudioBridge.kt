@@ -230,6 +230,30 @@ class AudioBridge(
         }
     }
 
+    /** Plays a short DTMF tone into the call, the same path as the iPhone voice (uplink or speaker). */
+    fun playTone(digit: String) {
+        if (!running) return
+        val f = when (digit) {
+            "1" -> 697 to 1209; "2" -> 697 to 1336; "3" -> 697 to 1477
+            "4" -> 770 to 1209; "5" -> 770 to 1336; "6" -> 770 to 1477
+            "7" -> 852 to 1209; "8" -> 852 to 1336; "9" -> 852 to 1477
+            "*" -> 941 to 1209; "0" -> 941 to 1336; "#" -> 941 to 1477
+            else -> return
+        }
+        val total = RATE / 1000 * 180 // 180 ms
+        var i = 0
+        while (i < total) {
+            val frame = ShortArray(FRAME)
+            for (j in frame.indices) {
+                val t = (i + j).toDouble() / RATE
+                val v = (Math.sin(2 * Math.PI * f.first * t) + Math.sin(2 * Math.PI * f.second * t)) * 0.3
+                frame[j] = (v * Short.MAX_VALUE).toInt().toShort()
+            }
+            queue.offer(frame)
+            i += FRAME
+        }
+    }
+
     fun play(mulaw: ByteArray) {
         if (!running || mulaw.size != FRAME) return
         if (queue.size > 12) queue.clear() // too far behind: drop to keep the delay low
