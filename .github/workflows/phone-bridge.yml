@@ -1,0 +1,130 @@
+name: Phone Bridge build
+
+on:
+  push:
+    paths:
+      - "phone-bridge/**"
+      - "!phone-bridge/dist/**"
+      - ".github/workflows/phone-bridge.yml"
+  workflow_dispatch:
+
+jobs:
+  relay-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r phone-bridge/relay/requirements.txt cryptography
+      - run: python phone-bridge/relay/test_relay.py phone-bridge/relay/relay.py
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Crypto cross-check (Kotlin <-> Python reference)
+        run: |
+          pip install -q cryptography
+          python phone-bridge/tests/crypto_vector.py make a > /tmp/vec.json
+          PB_VECTOR=/tmp/vec.json PB_REPLY=/tmp/reply.json gradle -p phone-bridge/android testDebugUnitTest --no-daemon
+          python phone-bridge/tests/crypto_vector.py verify /tmp/vec.json /tmp/reply.json
+      - run: gradle -p phone-bridge/android assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhoneBridge-android-apk
+          path: phone-bridge/android/app/build/outputs/apk/debug/app-debug.apk
+
+  android-emulator:
+    # Real emulator: Shizuku started with ADB, an emulated phone call, then CallTapTest.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Free disk (the emulator image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+      # The repository is ~9 GB; this job needs only the app.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            phone-bridge
+            .github
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Download Shizuku
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release download --repo RikkaApps/Shizuku --pattern '*.apk' --dir /tmp/shizuku
+          ls -la /tmp/shizuku
+          echo "SHIZUKU_APK=$(ls /tmp/shizuku/*.apk | head -1)" >> "$GITHUB_ENV"
+      - name: Build test APKs
+        run: gradle -p phone-bridge/android assembleDebug assembleDebugAndroidTest --no-daemon
+      - name: Emulator test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: phone-bridge/tests/android_emulator.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PhoneBridge-android-emulator-test
+          path: |
+            phone-bridge/android/build/emulator
+            phone-bridge/android/app/build/reports/androidTests
+            phone-bridge/android/app/build/outputs/androidTest-results
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, crypto check, end-to-end test, screenshots
+        run: phone-bridge/tests/ios_e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PhoneBridge-ios-screenshots
+          path: phone-bridge/ios/screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhoneBridge-ios-ipa
+          path: phone-bridge/ios/PhoneBridge-unsigned.ipa
+
+  publish:
+    # Put the built files on the branch too, so they can be fetched with git.
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: dl }
+      - run: |
+          mkdir -p phone-bridge/dist
+          cp dl/PhoneBridge-android-apk/app-debug.apk phone-bridge/dist/PhoneBridge.apk
+          cp dl/PhoneBridge-ios-ipa/PhoneBridge-unsigned.ipa phone-bridge/dist/PhoneBridge.ipa
+          rm -rf phone-bridge/dist/screenshots && cp -R dl/PhoneBridge-ios-screenshots phone-bridge/dist/screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add phone-bridge/dist
+          git commit -m "Phone Bridge: built apps for ${GITHUB_SHA::7}" || exit 0
+          git pull --rebase -q || true
+          git push
