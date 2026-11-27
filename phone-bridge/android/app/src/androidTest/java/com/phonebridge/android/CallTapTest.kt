@@ -71,6 +71,28 @@ class CallTapTest {
         assertEquals("the call line service must have the shell identity", 2000, uid)
     }
 
+    /**
+     * The built-in ADB path without the pairing step: start ShellMain as the shell user (what the
+     * "shell:" command of the ADB connection does) and wait until it hands its binder to the app
+     * through ShellBinderProvider. The pairing and the TLS connection itself need a real phone.
+     */
+    @Test
+    fun builtInAdbPathHandsBinderBack() {
+        AdbShell.stop()
+        val cmd = "app_process " + AdbShell.appProcessArgs(ctx)
+        log("starting like the built-in ADB does: $cmd")
+        val pfd = inst.uiAutomation.executeShellCommand(cmd)
+        Thread {
+            try { android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).readBytes() } catch (_: Throwable) {}
+        }.apply { isDaemon = true }.start()
+        val attached = waitFor(25_000) { AdbShell.ready() }
+        val svc = AdbShell.service()
+        log("attached=$attached uid=${svc?.uid()} methods=${svc?.methods()}")
+        assertTrue("the shell process did not hand its binder to the app", attached)
+        assertEquals("the built-in service must have the shell identity", 2000, svc?.uid())
+        AdbShell.stop()
+    }
+
     @Test
     fun callLineRecords() {
         log("phone: ${CallTap.info()}")

@@ -35,7 +35,7 @@
         android:allowBackup="false"
         android:label="Ghafoorii"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.Ghafoorii">
 
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -93,6 +93,9 @@
                 <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
+
+        <!-- The pairing code typed into the "Ghafoorii pairing" notification (AdbPairing.kt). -->
+        <receiver android:name=".PairReceiver" android:exported="false" />
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

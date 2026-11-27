@@ -42,15 +42,17 @@ Android (SIM)  ⇄  سرور واسط (سرور خودت)  ⇄  iPhone
 
 این کار دسترسی shell می‌خواهد. دو راه دارد:
 
-**راه ۱: داخل خود برنامه (بدون برنامه‌ی دیگر، اندروید ۱۱ به بالا) — پیشنهادی**
+**راه ۱: داخل خود برنامه (بدون برنامه‌ی دیگر، اندروید ۱۲ به بالا) — پیشنهادی**
+در صفحهٔ اصلی، در کارت **Set up**، ردیف **Call sound, both ways** را بزن (دکمهٔ **Connect**). یک برگهٔ راهنما باز می‌شود:
 1. تنظیمات ← Developer options ← **Wireless debugging** را روشن کن (اول باید وای‌فای وصل باشد).
-2. در Ghafoorii دکمهٔ **4b** را بزن.
-3. در گوشی: Wireless debugging ← **Pair device with pairing code**. یک **پورت** و یک **کد ۶ رقمی** نشان می‌دهد.
-4. همان پورت و کد را در پنجرهٔ برنامه بنویس و **Pair & connect** را بزن.
-- بعد از هر ری‌استارت گوشی: وای‌فای و Wireless debugging را روشن کن و دکمهٔ **4b** را بزن (بار دوم دیگر کد نمی‌خواهد).
+2. در برگه **Start pairing** را بزن.
+3. در گوشی: Wireless debugging ← **Pair device with pairing code** را بزن و پنجره را باز بگذار.
+4. نوار اعلان را پایین بکش. در اعلان «Ghafoorii pairing» روی **Enter code** بزن و کد ۶ رقمی را بنویس. پورت را برنامه خودش پیدا می‌کند.
+- اگر اعلان کار نکرد، در برگه «I will type the port and code here instead» هست (باید پنجرهٔ کد کنار برنامه باز باشد، مثلاً با دو‌تکه کردن صفحه).
+- بعد از هر ری‌استارت گوشی یا عوض شدن وای‌فای، Wireless debugging خاموش می‌شود: روشنش کن و دوباره **Connect** را بزن (دیگر کد نمی‌خواهد).
 
-**راه ۲: با Shizuku (دکمهٔ 4c)**
-Shizuku را نصب و روشن کن، بعد دکمهٔ **4c** را بزن. مثل قبل.
+**راه ۲: با Shizuku (بخش Advanced ← Use Shizuku instead)**
+Shizuku را نصب و روشن کن، بعد همان گزینه را بزن.
 
 **روش‌ها (۲۴ روش، با همان اسم‌هایی که آیتل در لیستش دارد):**
 برنامه روش‌هایی را که روی این گوشی ممکن است به‌ترتیب امتحان می‌کند و روشی را که کار کرد به خاطر می‌سپارد. دکمهٔ **Call line method** لیست را باز می‌کند، مثل لیست آیتل. اگر آیتل روی گوشی تو با یک روش (مثلاً Panda) بی‌صدا کار می‌کند، همان را اینجا انتخاب کن.
@@ -134,13 +136,13 @@ sudo bash setup.sh
 
 1. APK را نصب کن.
 2. اگر Android 13 یا بالاتر است و اجازه‌ها قفل‌اند: App info ← ⋮ ← **Allow restricted settings**.
-3. در برنامه:
-   1. آدرس سرور را بنویس (`wss://...`).
-   2. Grant permissions
-   3. Do not restrict battery
-   4. Call sound to iPhone: در Accessibility، «Phone Bridge call audio» را روشن کن
-   4b. (پیشنهادی) Clean call sound: Shizuku، بخش «صدای تمیز تماس» را ببین
-   5. Create new pairing
+3. صفحهٔ اصلی یک فهرست **Set up** دارد که نشان می‌دهد چه چیزی مانده. ردیف‌ها را به ترتیب انجام بده:
+   1. **Permissions**: Grant
+   2. **Keep running in the background**: Allow
+   3. **Call sound, both ways**: Connect (بخش «صدای تمیز تماس» را ببین)
+   4. **Microphone backup** (اختیاری): در Accessibility، «Ghafoorii call audio» را روشن کن
+   5. **Link your iPhone**: آدرس سرور را در کارت **Connection** بنویس (خالی = فقط بلوتوث)، بعد Create QR
+4. بالای صفحه با **Start bridge** پل را روشن کن.
 
 ### ۴. آیفون (تست ۷ روزه، بدون مک)
 

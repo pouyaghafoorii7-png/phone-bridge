@@ -17,7 +17,7 @@ import kotlin.system.exitProcess
  * It runs with the shell identity (uid 2000), the same rights Shizuku would give. It builds a Context,
  * creates the call-line service and hands its binder to the app through ShellBinderProvider, then waits.
  *
- * Android 11+ only (the AttributionSource `call` shape and wireless-debugging pairing). On Android 10
+ * Android 12+ only (the AttributionSource `call` shape; Android 11 has another one). On older phones
  * the app uses Shizuku instead.
  */
 object ShellMain {
@@ -45,6 +45,10 @@ object ShellMain {
         val ok = try { attach(bundle) } catch (e: Throwable) { Log.e(TAG, "attach failed", e); null }
         if (ok == null) {
             Log.e(TAG, "could not hand the binder to the app")
+            exitProcess(1)
+        }
+        if (ok.getBoolean("stale")) {
+            Log.e(TAG, "the app does not know this token (an older copy), exiting")
             exitProcess(1)
         }
         Log.i(TAG, "binder handed to the app")

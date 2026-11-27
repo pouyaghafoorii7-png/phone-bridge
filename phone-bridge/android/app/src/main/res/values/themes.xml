@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Day. Night is in values-night/themes.xml (same items, light system bars off). -->
+    <style name="Theme.Ghafoorii" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorHint">@color/text3</item>
+        <item name="android:colorAccent">@color/amber</item>
+    </style>
+
+    <!-- Bottom sheet dialogs (Kit.sheet) -->
+    <style name="SheetAnim" parent="@android:style/Animation">
+        <item name="android:windowEnterAnimation">@anim/sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/sheet_out</item>
+    </style>
+    <style name="Sheet" parent="@android:style/Theme.DeviceDefault.Dialog.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowAnimationStyle">@style/SheetAnim</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:colorAccent">@color/amber</item>
+    </style>
+</resources>

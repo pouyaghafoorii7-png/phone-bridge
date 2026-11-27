@@ -28,6 +28,13 @@ jobs:
         with: { gradle-version: "8.9" }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
+      # Keep the same signing key between builds, so a new APK installs over the old one (and keeps the
+      # app's data, like the wireless debugging pairing). The key is made by the first build and cached;
+      # it is not stored in the repository.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: debug-keystore-v1
       - name: Crypto cross-check (Kotlin <-> Python reference)
         run: |
           pip install -q cryptography
@@ -109,7 +116,9 @@ jobs:
 
   publish:
     # Put the built files on the branch too, so they can be fetched with git.
-    needs: [android, ios]
+    # The emulator job is waited for (its screenshots go along) but does not block the files.
+    needs: [android, ios, android-emulator]
+    if: ${{ always() && needs.android.result == 'success' && needs.ios.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -122,6 +131,9 @@ jobs:
           cp dl/PhoneBridge-android-apk/app-debug.apk phone-bridge/dist/PhoneBridge.apk
           cp dl/PhoneBridge-ios-ipa/PhoneBridge-unsigned.ipa phone-bridge/dist/PhoneBridge.ipa
           rm -rf phone-bridge/dist/screenshots && cp -R dl/PhoneBridge-ios-screenshots phone-bridge/dist/screenshots
+          # Pictures of the Android screen made on the emulator (if that job ran)
+          rm -rf phone-bridge/dist/screenshots-android && mkdir -p phone-bridge/dist/screenshots-android
+          cp dl/PhoneBridge-android-emulator-test/build/emulator/screens/*.png phone-bridge/dist/screenshots-android/ || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add phone-bridge/dist

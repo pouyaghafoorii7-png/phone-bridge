@@ -23,8 +23,21 @@ echo "== emulated incoming call, answered"
 adb emu gsm call 5551234; sleep 3; adb emu gsm accept 5551234; sleep 2
 adb shell dumpsys telephony.registry | grep -m2 mCallState
 
+# Pictures of the real screen first, while Shizuku is not yet allowed for the app (a fresh phone).
+echo "== screenshots (fresh phone, then set up; light and dark)"
 adb logcat -c
-gradle -p android connectedDebugAndroidTest --no-daemon
+gradle -p android connectedDebugAndroidTest --no-daemon \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.phonebridge.android.ScreenshotTest \
+  || echo "screenshot run failed (this does not fail the build)"
+mkdir -p "$OUT/screens"
+adb pull /data/local/tmp/ghafoorii-shots/. "$OUT/screens/" || true
+ls -la "$OUT/screens" || true
+adb logcat -d | grep -E 'PB-TEST' | tail -20 || true
+
+echo "== call line tests"
+adb logcat -c
+gradle -p android connectedDebugAndroidTest --no-daemon \
+  -Pandroid.testInstrumentationRunnerArguments.notClass=com.phonebridge.android.ScreenshotTest
 rc=$?
 adb logcat -d > "$OUT/logcat.txt"
 echo "== results"
