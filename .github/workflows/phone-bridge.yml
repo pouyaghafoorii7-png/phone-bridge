@@ -85,7 +85,6 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
-          profile: pixel_6 # a modern phone size (411 dp wide), so the screenshots look like a real phone
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: phone-bridge/tests/android_emulator.sh
@@ -97,6 +96,49 @@ jobs:
             phone-bridge/android/build/emulator
             phone-bridge/android/app/build/reports/androidTests
             phone-bridge/android/app/build/outputs/androidTest-results
+
+  android-screens:
+    # Pictures of the real Android screen on a phone-sized emulator (411 dp wide). Never blocks the build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Free disk (the emulator image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            phone-bridge
+            .github
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Build test APKs
+        run: gradle -p phone-bridge/android assembleDebug assembleDebugAndroidTest --no-daemon
+      - name: Screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: phone-bridge/tests/android_screens.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PhoneBridge-android-screens
+          path: phone-bridge/android/build/screens
 
   ios:
     runs-on: macos-15
@@ -117,8 +159,8 @@ jobs:
 
   publish:
     # Put the built files on the branch too, so they can be fetched with git.
-    # The emulator job is waited for (its screenshots go along) but does not block the files.
-    needs: [android, ios, android-emulator]
+    # The emulator jobs are waited for (the screenshots go along) but do not block the files.
+    needs: [android, ios, android-emulator, android-screens]
     if: ${{ always() && needs.android.result == 'success' && needs.ios.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -132,9 +174,9 @@ jobs:
           cp dl/PhoneBridge-android-apk/app-debug.apk phone-bridge/dist/PhoneBridge.apk
           cp dl/PhoneBridge-ios-ipa/PhoneBridge-unsigned.ipa phone-bridge/dist/PhoneBridge.ipa
           rm -rf phone-bridge/dist/screenshots && cp -R dl/PhoneBridge-ios-screenshots phone-bridge/dist/screenshots
-          # Pictures of the Android screen made on the emulator (if that job ran)
+          # Pictures of the Android screen made on the phone-sized emulator (if that job ran)
           rm -rf phone-bridge/dist/screenshots-android && mkdir -p phone-bridge/dist/screenshots-android
-          cp dl/PhoneBridge-android-emulator-test/build/emulator/screens/*.png phone-bridge/dist/screenshots-android/ || true
+          cp dl/PhoneBridge-android-screens/*.png phone-bridge/dist/screenshots-android/ || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add phone-bridge/dist
