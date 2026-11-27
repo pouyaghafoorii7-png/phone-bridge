@@ -601,9 +601,10 @@ class MainActivity : Activity() {
             add(k.step(2, "Tap “Pair device with pairing code”", "Leave that window open."), MATCH, t = 18)
             add(
                 k.step(
-                    3, "Type the code in the notification",
-                    "Pull down the notification bar. In the “Ghafoorii pairing” notification, tap “Enter code” and type the 6 digits. " +
-                        "VPN on? Switch it off for this step.",
+                    3, "Type the port and the code in the notification",
+                    "The pairing window shows a 6-digit code and an address like 192.168.1.5:43015. Pull down the notification bar. " +
+                        "In the “Ghafoorii pairing” notification, tap the small arrow (v) if you cannot see “Enter code”, tap it, " +
+                        "and type the port (the number after the colon), a space, then the 6 digits. VPN on? Switch it off for this step.",
                 ),
                 MATCH, t = 18,
             )

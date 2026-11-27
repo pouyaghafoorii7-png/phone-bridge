@@ -53,7 +53,8 @@ object AdbPairing {
         set(
             app, "searching",
             "Waiting for the pairing window. In Wireless debugging, tap “Pair device with pairing code”. " +
-                "If it is not found (a VPN can block it), type the port, a space, then the 6-digit code in this notification.",
+                "Then tap the small arrow (v) on this notification, tap “Enter code”, and type the port (the number after the colon " +
+                "in the pairing window), a space, then the 6-digit code.",
         )
         discover(app)
         main.removeCallbacks(giveUp)
