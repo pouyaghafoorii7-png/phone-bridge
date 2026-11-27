@@ -100,11 +100,21 @@ class AudioBridge(
     private fun capture() {
         // 1. The call line through Shizuku, method by method, until one gives real sound.
         var why = if (CallTap.ready()) "" else CallTap.state()
+        LineLog.add(
+            "audio: start. call line " + if (CallTap.ready()) "ready, will try " + lineOrder().joinToString(", ") { LineMethods.label(it) }
+            else "not ready (${CallTap.state()})",
+        )
         if (CallTap.ready()) {
             for (method in lineOrder()) {
                 if (!running) return
+                val label = LineMethods.label(method)
+                LineLog.add("audio: trying $label")
                 val (line, err) = CallTap.openLine(method)
-                if (line == null) { why = "$method: $err"; noteResult(method, ok = false); continue }
+                if (line == null) {
+                    LineLog.add("audio: $label refused: $err")
+                    why = "$method: $err"; noteResult(method, ok = false); continue
+                }
+                LineLog.add("audio: $label is open, the iPhone voice goes ${if (line.route == "direct") "into the call" else "to the speaker"}")
                 current = line
                 // The service puts the iPhone voice into the call (or plays it on the speaker for the
                 // speaker methods); we only hand it the frames.
@@ -119,12 +129,14 @@ class AudioBridge(
                 current = null
                 sink = null
                 if (!running) return
+                LineLog.add("audio: $label gave no sound in 4 s of the answered call; next method")
                 noteResult(method, ok = false)
                 why = "$method: silent"
             }
         }
 
         // 2. Fallback: the microphone, with the call on the speaker (or a cable).
+        LineLog.add("audio: falling back to the microphone (${why.ifEmpty { "no call line" }})")
         onInfo("direct", why.ifEmpty { "none" })
         val wired = speakerSink()
         val mics = listOf(
@@ -155,12 +167,16 @@ class AudioBridge(
         val buf = ShortArray(FRAME)
         var frames = 0
         var heard = 0.0
+        var all = 0
         verified = false
         while (running) {
             if (!src.read(buf)) return !running
+            // A level every 3 s for the first 30 s, so the log shows whether sound comes at all.
+            if (++all % 75 == 0 && all <= 750) LineLog.add("audio: level ${rms(buf).toInt()} (${src.name}, call ${if (isActive()) "answered" else "not answered yet"})")
             if (frames < window && isActive()) {
                 heard = maxOf(heard, rms(buf))
                 if (++frames == window) {
+                    LineLog.add("audio: ${src.name} loudest level in 4 s: ${heard.toInt()}")
                     if (heard < floor) return false
                     verified = true
                     onInfo("source", src.name)

@@ -91,6 +91,55 @@ class CallTapService() : ICallTap.Stub() {
 
     override fun log(): String = synchronized(logBuf) { logBuf.joinToString("\n") }
 
+    // ---- the phone call's own state (only the shell may read it) ----
+
+    @Volatile private var phaseAt = 0L
+    @Volatile private var phaseNow = ""
+
+    override fun callPhase(): String {
+        val now = System.currentTimeMillis()
+        if (now - phaseAt < 700) return phaseNow
+        phaseNow = try { parseCallPhase(readRegistry()) } catch (e: Throwable) {
+            note("call state unreadable: ${e.javaClass.simpleName}")
+            ""
+        }
+        phaseAt = now
+        return phaseNow
+    }
+
+    /** What `dumpsys telephony.registry` says (the shell is allowed to run it). */
+    private fun readRegistry(): String {
+        val p = ProcessBuilder("dumpsys", "telephony.registry").redirectErrorStream(true).start()
+        var text = ""
+        val reader = thread(name = "pb-dumpsys", isDaemon = true) {
+            text = try { p.inputStream.bufferedReader().readText() } catch (_: Throwable) { "" }
+        }
+        reader.join(3000)
+        if (reader.isAlive) { p.destroy(); reader.interrupt() }
+        return text
+    }
+
+    /**
+     * Precise call states: 1 active, 3 dialing, 4 alerting (the other phone rings), 5 incoming. The text
+     * differs a little between Android versions, so the numbers are found by their labels.
+     */
+    private fun parseCallPhase(text: String): String {
+        if (text.isBlank()) return ""
+        val fg = Regex("(?i)foreground\\s*call\\s*state\\W*(-?\\d+)").findAll(text).map { it.groupValues[1].toInt() }.toList()
+        val ring = Regex("(?i)ringing\\s*call\\s*state\\W*(-?\\d+)").findAll(text).map { it.groupValues[1].toInt() }.toList()
+        val plain = Regex("mCallState\\W*(\\d)").findAll(text).map { it.groupValues[1].toInt() }.toList()
+        return when {
+            fg.any { it == 1 } -> "active"
+            fg.any { it == 4 } -> "alerting"
+            fg.any { it == 3 } -> "dialing"
+            ring.any { it == 5 || it == 6 } -> "incoming"
+            plain.any { it == 2 } -> "offhook"
+            plain.any { it == 1 } -> "incoming"
+            plain.isNotEmpty() || fg.isNotEmpty() -> "idle"
+            else -> ""
+        }
+    }
+
     override fun info(): String =
         "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (sdk $sdk), chip ${soc()}, " +
             "telephony output ${telephonyOut() != null}, call interception ${pstnInterceptable()}, methods ${order().size}"

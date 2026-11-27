@@ -29,12 +29,24 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       # Keep the same signing key between builds, so a new APK installs over the old one (and keeps the
-      # app's data, like the wireless debugging pairing). The key is made by the first build and cached;
-      # it is not stored in the repository.
+      # app's data, like the wireless debugging pairing). The key is made once with keytool, in a path of
+      # our own, and cached; it is not stored in the repository. build.gradle.kts uses it through
+      # GHAFOORII_KEYSTORE. (The cache of Android's own debug.keystore did not hold: every APK so far had
+      # another certificate.)
       - uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: debug-keystore-v1
+          path: /home/runner/ghafoorii-debug.keystore
+          key: ghafoorii-debug-keystore-v1
+      - name: Debug signing key
+        run: |
+          KS=/home/runner/ghafoorii-debug.keystore
+          if [ -f "$KS" ]; then echo "signing key restored from the cache"; else
+            keytool -genkeypair -keystore "$KS" -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Ghafoorii Debug,O=Ghafoorii,C=US"
+            echo "signing key made (first build)"
+          fi
+          keytool -list -keystore "$KS" -storepass android | grep -i "fingerprint" | head -2
+          echo "GHAFOORII_KEYSTORE=$KS" >> "$GITHUB_ENV"
       - name: Crypto cross-check (Kotlin <-> Python reference)
         run: |
           pip install -q cryptography

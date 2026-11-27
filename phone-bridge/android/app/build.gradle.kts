@@ -14,6 +14,20 @@ android {
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    signingConfigs {
+        // CI keeps one debug signing key between builds (GHAFOORII_KEYSTORE), so a new APK installs over
+        // the old one and keeps the app's data (the wireless debugging pairing). On a laptop Android's own
+        // debug key is used. It is a debug key, not a secret, but it is not stored in the repository.
+        val shared = System.getenv("GHAFOORII_KEYSTORE")?.takeIf { file(it).exists() }
+        if (shared != null) {
+            getByName("debug") {
+                storeFile = file(shared)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
     buildTypes { release { isMinifyEnabled = false } }
     buildFeatures {
         aidl = true // ICallTap: the Shizuku call line service

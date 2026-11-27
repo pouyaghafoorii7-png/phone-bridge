@@ -72,6 +72,28 @@ class CallTapTest {
     }
 
     /**
+     * A call that the phone places stays "dialing" in the phone-state broadcast even when it is answered.
+     * The service reads the phone's own call state; the emulated call here is answered, so it must say "active".
+     */
+    @Test
+    fun callPhaseSeesTheAnsweredCall() {
+        val raw = dev.executeShellCommand("dumpsys telephony.registry")
+        raw.lines().filter { it.contains("call state", ignoreCase = true) || it.contains("mCallState") }
+            .take(14).forEach { log("registry: ${it.trim()}") }
+        val phase = CallTap.callPhase()
+        log("call phase = '$phase'")
+        assertEquals("the answered call must read as active", "active", phase)
+    }
+
+    /** The in-app test: it must find sound in the emulated call (the emulator gives a test tone). */
+    @Test
+    fun lineTesterFindsSound() {
+        val results = LineTester.run({ }, { }, { false })
+        results.forEach { log("tester: ${it.line()}") }
+        assertTrue("the tester found no method with sound", results.any { it.state == "sound" })
+    }
+
+    /**
      * The built-in ADB path without the pairing step: start ShellMain as the shell user (what the
      * "shell:" command of the ADB connection does) and wait until it hands its binder to the app
      * through ShellBinderProvider. The pairing and the TLS connection itself need a real phone.

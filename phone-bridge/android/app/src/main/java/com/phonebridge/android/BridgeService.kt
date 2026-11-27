@@ -287,9 +287,49 @@ class BridgeService : Service() {
 
     private fun onCallState(state: String) {
         callActive = state == "active"
+        LineLog.add("call state: $state" + if (audioWanted) " (iPhone wants the call sound)" else "")
         when (state) {
             "active", "dialing" -> if (audioWanted && audio == null) startAudio()
             "ended" -> stopAudio()
+        }
+        answerWatcher?.interrupt()
+        answerWatcher = null
+        if (state == "dialing") watchAnswer()
+    }
+
+    private var answerWatcher: Thread? = null
+
+    /**
+     * A call this phone places stays "dialing" in the phone-state broadcast even after the other side
+     * answers. The call line is judged silent only once the call is answered (it rings first), so ask the
+     * phone's own call state, through the shell service, once a second.
+     */
+    private fun watchAnswer() {
+        answerWatcher = kotlin.concurrent.thread(name = "pb-answer", isDaemon = true) {
+            val t0 = System.currentTimeMillis()
+            var seen = "?"
+            try {
+                while (!stopped) {
+                    val phase = CallTap.callPhase()
+                    if (phase != seen) { seen = phase; LineLog.add("call phase: " + phase.ifEmpty { "unknown" }) }
+                    val waited = System.currentTimeMillis() - t0
+                    when {
+                        phase == "active" -> {
+                            callActive = true
+                            LineLog.add("the call was answered")
+                            return@thread
+                        }
+                        phase == "idle" && waited > 6_000 -> return@thread
+                        (phase == "" || phase == "offhook") && waited > 25_000 -> {
+                            callActive = true
+                            LineLog.add("answer cannot be read here: treating the call as answered")
+                            return@thread
+                        }
+                    }
+                    Thread.sleep(1000)
+                }
+            } catch (_: InterruptedException) {
+            }
         }
     }
 

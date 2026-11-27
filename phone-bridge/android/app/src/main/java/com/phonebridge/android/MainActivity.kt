@@ -245,6 +245,7 @@ class MainActivity : Activity() {
             r.root.setOnClickListener { onClick() }
             advBody.add(r.root, MATCH)
         }
+        item(R.drawable.ic_call, "Test the call line", "One phone call shows which methods work here") { showLineTest() }
         item(R.drawable.ic_copy, "Call line log", "Copy it into a bug report when a method fails") { showLineLog() }
         item(R.drawable.ic_bolt, "Use Shizuku instead", "If the built-in way does not work on this phone") { openShizuku() }
         item(R.drawable.ic_link, "Pair the call line again", "If wireless debugging forgot this app") {
@@ -766,8 +767,10 @@ class MainActivity : Activity() {
 
     /** The call-line service's own log: copy it into a bug report when a method does not work. */
     private fun showLineLog() {
-        val body = CallTap.log().ifEmpty { "No call line log yet. Connect the call line and make a call." }
-        val full = listOf(CallTap.info(), body).filter { it.isNotBlank() }.joinToString("\n\n")
+        val app = LineLog.text().ifEmpty { "(nothing yet)" }
+        val svc = CallTap.log().ifEmpty { "(nothing yet. Connect the call line and make a call.)" }
+        val full = listOf(CallTap.info(), "— app —", app, "— call line service —", svc)
+            .filter { it.isNotBlank() }.joinToString("\n")
         k.sheet("Call line log", "Copy this into a bug report when a method does not work.") { _ ->
             val tv = TextView(this@MainActivity).apply {
                 text = full
@@ -785,6 +788,71 @@ class MainActivity : Activity() {
                 copy.bind("Copied", R.drawable.ic_check, Kit.Look.TONAL)
             }
             add(copy.root, MATCH, dp(54), t = 12)
+        }
+    }
+
+    /** One phone call shows which methods carry the caller's voice, and which carry ours (see LineTester). */
+    private fun showLineTest() {
+        if (!CallTap.ready()) { snack.show("Connect the call line first (the Connect button)."); return }
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val busy = java.util.concurrent.atomic.AtomicBoolean(false)
+        val all = mutableListOf<LineTester.Result>()
+        k.sheet("Test the call line", "Finds which methods work on this phone, in one phone call.") { dlg ->
+            add(k.step(1, "Call someone from this phone", "Use the phone's own dialer, not the iPhone. Let them answer and talk (or play music near their phone)."), MATCH, t = 16)
+            add(k.step(2, "Come back here and tap Start", "The bridge stops by itself. The test takes about a minute."), MATCH, t = 14)
+            add(k.step(3, "Ask them to count the beeps", "At the end, each method sends beeps into the call: 1 beep for the first, 2 for the second, and so on. The list below says which method sent how many."), MATCH, t = 14)
+            val status = k.strip("Ready.")
+            add(status, MATCH, t = 18)
+            val rows = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+            add(rows, MATCH, t = 10)
+            val views = HashMap<String, TextView>()
+            val go = k.Button().apply { bind("Start the test", R.drawable.ic_play, Kit.Look.PRIMARY) }
+            val copy = k.Button().apply { bind("Copy the results", R.drawable.ic_copy, Kit.Look.TONAL) }
+            copy.root.visibility = View.GONE
+            go.root.setOnClickListener {
+                if (busy.get()) { stop.set(true); status.text = "Stopping…"; return@setOnClickListener }
+                busy.set(true); stop.set(false)
+                all.clear(); views.clear(); rows.removeAllViews(); copy.root.visibility = View.GONE
+                go.bind("Stop the test", R.drawable.ic_stop, Kit.Look.TONAL)
+                BridgeService.stop(this@MainActivity)
+                LineLog.add("test started")
+                Thread {
+                    val results = LineTester.run(
+                        onStep = { s -> runOnUiThread { status.text = s } },
+                        onResult = { r ->
+                            runOnUiThread {
+                                val tv = views.getOrPut(r.code) {
+                                    TextView(this@MainActivity).also {
+                                        it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                                        it.setPadding(dp(4), dp(7), dp(4), dp(7))
+                                        rows.addView(it)
+                                    }
+                                }
+                                tv.text = r.line()
+                                tv.setTextColor(k.c(when (r.state) { "sound" -> R.color.ok; "refused" -> R.color.bad; else -> R.color.text2 }))
+                            }
+                        },
+                        cancelled = { stop.get() || !dlg.isShowing },
+                    )
+                    all.clear(); all.addAll(results)
+                    runOnUiThread {
+                        busy.set(false)
+                        go.bind("Run it again", R.drawable.ic_refresh, Kit.Look.TONAL)
+                        copy.root.visibility = View.VISIBLE
+                        val good = results.filter { it.state == "sound" }.joinToString(", ") { it.name }
+                        status.text = if (good.isEmpty()) "No method gave the caller's voice. Was the other person talking?"
+                        else "These gave the caller's voice: $good. Write down how many beeps they heard for each method."
+                    }
+                }.start()
+            }
+            copy.root.setOnClickListener {
+                val text = CallTap.info() + "\n" + all.joinToString("\n") { it.line() }
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Ghafoorii call line test", text))
+                copy.bind("Copied", R.drawable.ic_check, Kit.Look.TONAL)
+            }
+            add(go.root, MATCH, dp(54), t = 12)
+            add(copy.root, MATCH, dp(50), t = 8)
+            dlg.setOnDismissListener { stop.set(true) }
         }
     }
 

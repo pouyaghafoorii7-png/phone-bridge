@@ -124,6 +124,9 @@ object CallTap {
     /** The service's own recent log lines, for bug reports. */
     fun log(): String = try { svc()?.log() ?: "" } catch (_: Exception) { "" }
 
+    /** What the phone call is doing (see ICallTap.callPhase), or "" when it cannot be read. */
+    fun callPhase(): String = try { svc()?.callPhase() ?: "" } catch (_: Exception) { "" }
+
     /**
      * Opens the call line with one method: the caller's voice comes out of [CallLine.read], the
      * iPhone voice goes in with [CallLine.send]. Returns null and the reason when the phone refuses.

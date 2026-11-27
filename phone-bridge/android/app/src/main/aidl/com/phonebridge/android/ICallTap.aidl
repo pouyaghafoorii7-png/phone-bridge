@@ -30,4 +30,10 @@ interface ICallTap {
 
     // The service's own recent log lines, for bug reports.
     String log() = 7;
+
+    // What the phone call is doing now, read from the phone's own call state: "idle", "incoming",
+    // "dialing", "alerting" (the other phone rings), "active" (answered), "offhook" (in a call, state
+    // unknown), or "" when it cannot be read. A call that the phone placed is only known to be
+    // answered this way: the usual phone-state broadcast does not change when the other side answers.
+    String callPhase() = 8;
 }
