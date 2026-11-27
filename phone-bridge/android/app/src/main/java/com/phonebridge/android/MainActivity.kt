@@ -270,7 +270,21 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         CallTap.prepare(this)
+        autoConnect()
         tick()
+    }
+
+    private var autoTried = false
+
+    /**
+     * After a restart of the app or the phone: if this app was paired before, start the call line by
+     * itself, without any window. If wireless debugging is off, the checklist row says so.
+     */
+    private fun autoConnect() {
+        if (autoTried || Build.VERSION.SDK_INT < 31 || !AdbShell.paired(this)) return
+        if (CallTap.ready() || CallTap.state() == "starting") return
+        autoTried = true
+        AdbShell.connect(this) { _, _ -> main.post { refresh() } }
     }
 
     override fun onPause() {
@@ -358,13 +372,13 @@ class MainActivity : Activity() {
             )
         }
         rowMic.bind(
-            if (micOn) Kit.Tone.DONE else Kit.Tone.QUIET, R.drawable.ic_mic, "Microphone backup",
+            if (micOn) Kit.Tone.DONE else Kit.Tone.QUIET, R.drawable.ic_mic, "Microphone backup (optional)",
             when {
                 micOn -> "On. Used only when the direct line is off."
                 lineOn -> "Off. Not needed while the direct line is on."
                 else -> "Off. Turn it on if the direct line does not work."
             },
-            actionText = if (micOn) null else "Open", chevronOn = micOn, optional = true,
+            actionText = if (micOn) null else "Open", chevronOn = micOn,
         )
         rowLink.bind(
             if (paired) Kit.Tone.DONE else Kit.Tone.TODO, R.drawable.ic_qr, "Link your iPhone",
@@ -574,8 +588,8 @@ class MainActivity : Activity() {
             add(
                 k.step(
                     1, "Turn on Wireless debugging",
-                    "Settings → Developer options → Wireless debugging. Wi-Fi must be on. No Developer options? " +
-                        "Settings → About phone → Software information, then tap “Build number” 7 times.",
+                    "Settings → Developer options → Wireless debugging. Wi-Fi must be on, but only for this step. " +
+                        "No Developer options? Settings → About phone → Software information, then tap “Build number” 7 times.",
                 ),
                 MATCH, t = 18,
             )
@@ -627,7 +641,7 @@ class MainActivity : Activity() {
     private fun showWirelessOff() {
         k.sheet("Turn on Wireless debugging", "Android turns it off after a restart or when Wi-Fi changes. This app is already paired.") { dlg ->
             add(
-                k.step(1, "Connect to Wi-Fi", "Wireless debugging only works while the phone is on Wi-Fi."),
+                k.step(1, "Connect to Wi-Fi", "Wireless debugging only works while the phone is on Wi-Fi. Once the call line is on, you can switch Wi-Fi off again."),
                 MATCH, t = 18,
             )
             add(
@@ -751,7 +765,7 @@ class MainActivity : Activity() {
     /** The call-line service's own log: copy it into a bug report when a method does not work. */
     private fun showLineLog() {
         val body = CallTap.log().ifEmpty { "No call line log yet. Connect the call line and make a call." }
-        val full = CallTap.info() + "\n\n" + body
+        val full = listOf(CallTap.info(), body).filter { it.isNotBlank() }.joinToString("\n\n")
         k.sheet("Call line log", "Copy this into a bug report when a method does not work.") { _ ->
             val tv = TextView(this@MainActivity).apply {
                 text = full

@@ -27,6 +27,9 @@ object AdbShell {
     const val NOT_PAIRED = "not paired"
     const val NO_WIRELESS = "no wireless debugging"
 
+    /** Handed to the shell process; it exits when this app process dies (see ShellBinderProvider). */
+    val clientBinder: android.os.IBinder = android.os.Binder()
+
     @Volatile private var binder: ICallTap? = null
     @Volatile private var latch: CountDownLatch? = null
     @Volatile var state: String = "idle"; private set // idle | pairing | connecting | starting | ready | error
@@ -59,9 +62,11 @@ object AdbShell {
     fun clearError() { if (state == "error") { state = "idle"; detail = "" } }
 
     /** The arguments for `app_process` that start ShellMain as the shell user. The emulator test uses the same ones. */
-    fun appProcessArgs(app: Context): String =
-        "-Djava.class.path=${app.packageCodePath} /system/bin --nice-name=${app.packageName}:adb " +
+    fun appProcessArgs(app: Context, quoted: Boolean = false): String {
+        val apk = if (quoted) "'${app.packageCodePath}'" else app.packageCodePath // quotes only for a shell
+        return "-Djava.class.path=$apk /system/bin --nice-name=${app.packageName}:adb " +
             "${ShellMain::class.java.name} ${token(app)}"
+    }
 
     /** Called by ShellBinderProvider when the shell process hands us its binder. */
     fun onShellBinder(b: ICallTap) {
@@ -116,7 +121,7 @@ object AdbShell {
             state = "starting"
             val l = CountDownLatch(1); latch = l
             try {
-                val cmd = "nohup app_process ${appProcessArgs(app)} >/dev/null 2>&1 &"
+                val cmd = "nohup app_process ${appProcessArgs(app, quoted = true)} >/dev/null 2>&1 &"
                 val stream = mgr.openStream("shell:$cmd")
                 // Drain briefly for any immediate error, then leave the nohup'd process running.
                 thread(name = "pb-adb-drain", isDaemon = true) {

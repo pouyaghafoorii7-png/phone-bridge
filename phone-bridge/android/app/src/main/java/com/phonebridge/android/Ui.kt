@@ -194,12 +194,13 @@ class Kit(val ctx: Context) {
         private val badge = FrameLayout(ctx)
         private val badgeIcon = ImageView(ctx).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         private val title = text("", 16f, c(R.color.text), Weight.SEMIBOLD)
-        private val tag = text("OPTIONAL", 10f, c(R.color.text3), Weight.SEMIBOLD).apply { letterSpacing = 0.08f }
         private val sub = text("", 13f, c(R.color.text2)).apply { setLineSpacing(0f, 1.12f) }
         private val action = text("", 13.5f, c(R.color.ink), Weight.SEMIBOLD).apply {
             gravity = Gravity.CENTER
+            setSingleLine()
             minHeight = dp(36)
-            setPadding(dp(16), 0, dp(16), 0)
+            minWidth = dp(72)
+            setPadding(dp(18), 0, dp(18), 0)
             background = shape(c(R.color.amber), 18)
         }
         val chevron = icon(R.drawable.ic_chevron, c(R.color.text3))
@@ -209,7 +210,7 @@ class Kit(val ctx: Context) {
             badge.addView(badgeIcon, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
             root.add(badge, dp(42), dp(42))
             val mid = vbox()
-            mid.add(hbox().add(title).add(tag, l = 8))
+            mid.add(title)
             mid.add(sub, t = 3)
             root.add(mid, 0, WRAP, 1f, l = 14, r = 10)
             root.add(action, WRAP, WRAP)
@@ -218,7 +219,7 @@ class Kit(val ctx: Context) {
 
         fun bind(
             tone: Tone, iconRes: Int, t: String, s: String,
-            actionText: String? = null, chevronOn: Boolean = false, optional: Boolean = false,
+            actionText: String? = null, chevronOn: Boolean = false,
         ) {
             val next = "$tone|$iconRes"
             if (next != sig) {
@@ -234,7 +235,6 @@ class Kit(val ctx: Context) {
             }
             if (title.text.toString() != t) title.text = t
             if (sub.text.toString() != s) sub.text = s
-            tag.visibility = if (optional) View.VISIBLE else View.GONE
             if (actionText != null) {
                 if (action.text.toString() != actionText) action.text = actionText
                 action.visibility = View.VISIBLE
@@ -322,7 +322,7 @@ class Kit(val ctx: Context) {
             addView(body, MATCH, WRAP)
         }
         root.addView(scroll, MATCH, WRAP)
-        dlg.setContentView(root)
+        dlg.setContentView(root, ViewGroup.LayoutParams(MATCH, WRAP))
         dlg.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setLayout(MATCH, WRAP)

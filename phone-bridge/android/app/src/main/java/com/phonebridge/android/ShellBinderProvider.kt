@@ -22,7 +22,9 @@ class ShellBinderProvider : ContentProvider() {
         }
         val binder = extras.getBinder("binder") ?: return null
         AdbShell.onShellBinder(ICallTap.Stub.asInterface(binder))
-        return Bundle()
+        // The shell process watches this binder: when the app process dies it exits too, so old copies
+        // do not pile up after every restart of the app.
+        return Bundle().apply { putBinder("client", AdbShell.clientBinder) }
     }
 
     override fun query(uri: Uri, p: Array<String>?, s: String?, a: Array<String>?, o: String?): Cursor? = null

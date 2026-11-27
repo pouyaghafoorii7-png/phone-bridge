@@ -52,6 +52,15 @@ object ShellMain {
             exitProcess(1)
         }
         Log.i(TAG, "binder handed to the app")
+        // Leave together with the app process, so copies of this process do not pile up.
+        try {
+            ok.getBinder("client")?.linkToDeath({
+                Log.i(TAG, "the app is gone, exiting")
+                exitProcess(0)
+            }, 0)
+        } catch (e: Throwable) {
+            Log.w(TAG, "could not watch the app", e)
+        }
         Looper.loop()
     }
 

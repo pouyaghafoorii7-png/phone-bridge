@@ -99,9 +99,17 @@ class ScreenshotTest {
             BridgeService.stop(ctx)
         } catch (e: Throwable) { log("bridge did not start: ${e.message}") }
         a = launch()
-        dev.findObject(By.text("Show QR"))?.click()
-        Thread.sleep(900)
+        call(a, "showQr")
+        Thread.sleep(1200)
         shot("07-light-qr")
+        a = launch()
+        call(a, "showManualPair")
+        shot("12-light-manual-pair")
+        dev.pressBack()
+        a = launch()
+        call(a, "showWirelessOff")
+        shot("13-light-wireless-off")
+        dev.pressBack()
 
         // 3. Dark.
         sh("cmd uimode night yes")

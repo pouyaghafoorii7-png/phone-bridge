@@ -85,6 +85,7 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
+          profile: pixel_6 # a modern phone size (411 dp wide), so the screenshots look like a real phone
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: phone-bridge/tests/android_emulator.sh
