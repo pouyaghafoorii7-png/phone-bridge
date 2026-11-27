@@ -397,7 +397,7 @@ class HeroDrawable(ctx: Context) : Drawable() {
 
     override fun onBoundsChange(b: Rect) {
         glow.shader = RadialGradient(
-            b.right - 80 * d, b.top + 60 * d, 150 * d,
+            b.right - 70 * d, b.top + 50 * d, 140 * d,
             intArrayOf(0x6BFBB21C, 0x00FBB21C), null, Shader.TileMode.CLAMP,
         )
         clip.reset()
@@ -410,16 +410,17 @@ class HeroDrawable(ctx: Context) : Drawable() {
         canvas.clipPath(clip)
         canvas.drawRect(b, base)
         canvas.drawRect(b, glow)
-        val cx = b.right - 40 * d
-        val cy = b.top + 40 * d
+        // The road-sign diamond sits in the corner, clear of the text lines.
+        val cx = b.right - 34 * d
+        val cy = b.top + 28 * d
         canvas.save()
         canvas.rotate(45f, cx, cy)
         line.strokeWidth = 3 * d
         line.color = 0x8CFBB21C.toInt()
-        canvas.drawRoundRect(RectF(cx - 66 * d, cy - 66 * d, cx + 66 * d, cy + 66 * d), 22 * d, 22 * d, line)
+        canvas.drawRoundRect(RectF(cx - 50 * d, cy - 50 * d, cx + 50 * d, cy + 50 * d), 18 * d, 18 * d, line)
         line.strokeWidth = 2 * d
         line.color = 0x4DFBB21C
-        canvas.drawRoundRect(RectF(cx - 46 * d, cy - 46 * d, cx + 46 * d, cy + 46 * d), 16 * d, 16 * d, line)
+        canvas.drawRoundRect(RectF(cx - 35 * d, cy - 35 * d, cx + 35 * d, cy + 35 * d), 13 * d, 13 * d, line)
         canvas.restore()
         canvas.restore()
         val edge = RectF(b).apply { inset(d / 2, d / 2) }

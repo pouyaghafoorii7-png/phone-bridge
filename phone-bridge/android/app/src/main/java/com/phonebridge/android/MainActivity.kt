@@ -103,7 +103,8 @@ class MainActivity : Activity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         k = Kit(this)
         list = k.vbox().apply { setPadding(dp(16), dp(8), dp(16), dp(32)) }
-        val parts = listOf(header(), hero(), setupCard(), connectionCard(), qrCard(), advancedCard(), footer())
+        // The QR card sits right under the status card, so it is on screen as soon as it opens.
+        val parts = listOf(header(), hero(), qrCard(), setupCard(), connectionCard(), advancedCard(), footer())
         parts.forEachIndexed { i, v -> list.add(v, MATCH, t = if (i == 0) 0 else 16) }
         scroll = ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
@@ -353,7 +354,7 @@ class MainActivity : Activity() {
             actionText = if (missing.isEmpty()) null else "Grant", chevronOn = missing.isEmpty(),
         )
         rowBatt.bind(
-            if (batt) Kit.Tone.DONE else Kit.Tone.TODO, R.drawable.ic_battery, "Keep running in the background",
+            if (batt) Kit.Tone.DONE else Kit.Tone.TODO, R.drawable.ic_battery, "Run in the background",
             if (batt) "Not restricted" else "Android may stop the bridge to save power",
             actionText = if (batt) null else "Allow", chevronOn = batt,
         )
@@ -471,7 +472,7 @@ class MainActivity : Activity() {
         qr.setImageBitmap(Bitmap.createBitmap(px, size, size, Bitmap.Config.ARGB_8888))
         TransitionManager.beginDelayedTransition(list, AutoTransition().setDuration(220))
         qrCard.visibility = View.VISIBLE
-        scroll.post { scroll.smoothScrollTo(0, qrCard.top - dp(12)) }
+        scroll.postDelayed({ scroll.smoothScrollTo(0, 0) }, 260) // after the card has opened
     }
 
     private fun hideQr(animate: Boolean) {
