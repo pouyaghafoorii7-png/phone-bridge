@@ -50,7 +50,11 @@ object AdbPairing {
         appCtx = app
         stopDiscovery()
         port = -1
-        set(app, "searching", "Waiting for the pairing window. In Wireless debugging, tap “Pair device with pairing code”.")
+        set(
+            app, "searching",
+            "Waiting for the pairing window. In Wireless debugging, tap “Pair device with pairing code”. " +
+                "If it is not found (a VPN can block it), type the port and the code in this notification, like 41231 482910.",
+        )
         discover(app)
         main.removeCallbacks(giveUp)
         main.postDelayed(giveUp, 5 * 60_000L)

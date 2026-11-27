@@ -600,7 +600,8 @@ class MainActivity : Activity() {
             add(
                 k.step(
                     3, "Type the code in the notification",
-                    "Pull down the notification bar. In the “Ghafoorii pairing” notification, tap “Enter code” and type the 6 digits.",
+                    "Pull down the notification bar. In the “Ghafoorii pairing” notification, tap “Enter code” and type the 6 digits. " +
+                        "VPN on? Switch it off for this step.",
                 ),
                 MATCH, t = 18,
             )
